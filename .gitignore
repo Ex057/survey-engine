@@ -8,7 +8,6 @@ ehthumbs.db
 Thumbs.db
 
 # IDE files
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -28,3 +27,6 @@ tmp/
 
 # Upload directories (if you have user uploads)
 uploads/private/
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore
