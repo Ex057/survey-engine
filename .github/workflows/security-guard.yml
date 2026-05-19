@@ -5,7 +5,6 @@
       types: [opened, synchronize, reopened]
     push:
       branches: [main]
-    workflow_dispatch:
 
   jobs:
     guard:
@@ -28,7 +27,6 @@
               base="${{ github.event.before }}"
               head="${{ github.sha }}"
             fi
-
             git diff --name-only "$base" "$head" > changed_files.txt || true
             echo "Changed files:"
             cat changed_files.txt || true
@@ -41,9 +39,7 @@
               echo "No changed files."
               exit 0
             fi
-
             blocked_regex='(^|/)\.(env|pem|p12|key)$|(^|/)(id_rsa|id_dsa)$|\.exe$|\.dll$|\.so$|\.dylib$|\.jar$|\.apk$|\.ipa$|\.ps1$|\.bat$|\.cmd$|\.scr$|(^|/)(node_modules|vendor)/.*\.(php|js|sh|py)$'
-
             bad_files=$(rg -n "$blocked_regex" changed_files.txt || true)
             if [[ -n "$bad_files" ]]; then
               echo "Blocked suspicious files detected:"
@@ -58,15 +54,14 @@
             if [[ ! -s changed_files.txt ]]; then
               exit 0
             fi
-
+            # Build grep input list excluding deleted files
             mapfile -t files < <(cat changed_files.txt)
             if [[ ${#files[@]} -eq 0 ]]; then
               exit 0
             fi
-
+            # Secrets/high-risk command patterns
             pattern='(AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----|ghp_[A-Za-z0-9_]{36,}|xox[baprs]-[A-Za-z0-9-]{10,}|curl\s+[^|\n]*\|\s*(bash|sh)|wget\s+[^|\n]*\|\s*(bash|sh)|eval\(|
   base64\s+-d\s*\|\s*(bash|sh)|system\(|shell_exec\(|passthru\(|proc_open\()'
-
             hit=0
             for f in "${files[@]}"; do
               [[ -f "$f" ]] || continue
@@ -76,7 +71,6 @@
                 hit=1
               fi
             done
-
             if [[ $hit -ne 0 ]]; then
               exit 1
             fi
