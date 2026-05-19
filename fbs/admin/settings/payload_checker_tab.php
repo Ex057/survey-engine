@@ -97,8 +97,8 @@ try {
         SELECT
             CONCAT('success_', dsl.id) as log_id,
             dsl.submission_id,
-            COALESCE(s.uid, ts.uid) as submission_uid,
-            COALESCE(s.created, ts.submitted_at) as submission_date,
+            COALESCE(ds.uid, s.uid, ts.uid) as submission_uid,
+            COALESCE(ds.submitted_at, s.created, ts.submitted_at) as submission_date,
             dsl.status,
             dsl.payload_sent,
             dsl.dhis2_response,
@@ -109,6 +109,7 @@ try {
             sy.dhis2_program_uid,
             sy.dhis2_instance,
             CASE 
+                WHEN ds.id IS NOT NULL THEN 'dataset'
                 WHEN s.id IS NOT NULL THEN 'regular'
                 WHEN ts.id IS NOT NULL THEN 'tracker'
                 ELSE 'unknown'
@@ -117,8 +118,11 @@ try {
         FROM dhis2_submission_log dsl
         LEFT JOIN submission s ON dsl.submission_id = s.id
         LEFT JOIN tracker_submissions ts ON dsl.submission_id = ts.id
-        LEFT JOIN survey sy ON COALESCE(s.survey_id, ts.survey_id) = sy.id
-        WHERE (s.id IS NOT NULL OR ts.id IS NOT NULL)
+        LEFT JOIN dataset_submissions ds
+          ON dsl.submission_id = ds.id
+         AND (dsl.payload_sent LIKE '%\"dataset\"%' OR dsl.payload_sent LIKE '%\"dataSet\"%')
+        LEFT JOIN survey sy ON COALESCE(ds.survey_id, s.survey_id, ts.survey_id) = sy.id
+        WHERE (s.id IS NOT NULL OR ts.id IS NOT NULL OR ds.id IS NOT NULL)
           AND (sy.dhis2_program_uid IS NOT NULL OR sy.dhis2_instance IS NOT NULL)
         ORDER BY dsl.submitted_at DESC
         LIMIT 50
@@ -239,17 +243,32 @@ try {
         background-color: rgba(0, 0, 0, 0.5);
         z-index: 9999;
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         justify-content: center;
         backdrop-filter: blur(4px);
+        padding-top: 90px;
+        padding-left: 260px;
+        padding-right: 20px;
+        box-sizing: border-box;
     }
     
     .payload-modal-dialog {
-        max-width: 90%;
-        max-height: 90%;
+        max-width: calc(100% - 280px);
+        max-height: calc(90vh - 90px);
         width: 1200px;
         margin: auto;
         position: relative;
+    }
+
+    @media (max-width: 991.98px) {
+        .payload-modal-overlay {
+            padding-left: 16px;
+            padding-right: 16px;
+        }
+
+        .payload-modal-dialog {
+            max-width: calc(100% - 32px);
+        }
     }
     
     .payload-modal-content {
@@ -312,6 +331,24 @@ try {
         display: flex;
         justify-content: flex-end;
         background: #f8f9fa;
+    }
+
+    .error-summary {
+        background: #fff5f5;
+        border: 1px solid #fca5a5;
+        border-radius: 10px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .error-summary h6 {
+        margin-bottom: 0.5rem;
+        color: #b91c1c;
+    }
+
+    .error-summary ul {
+        margin-bottom: 0;
+        padding-left: 1.25rem;
     }
 </style>
 
@@ -467,6 +504,11 @@ try {
                 <button type="button" class="payload-modal-close" onclick="PayloadModal.hide()">&times;</button>
             </div>
             <div class="payload-modal-body">
+                <div id="modal-error-summary" class="error-summary" style="display:none;">
+                    <h6><i class="fas fa-triangle-exclamation me-2"></i>Detected Issues</h6>
+                    <div class="text-muted small mb-2" id="modal-error-meta"></div>
+                    <ul id="modal-error-list"></ul>
+                </div>
                 <h6 class="text-dark"><i class="fas fa-upload me-2 text-primary"></i>Payload Sent:</h6>
                 <pre class="code-block" id="modal-payload"></pre>
                 
@@ -489,10 +531,14 @@ try {
             var modal = document.getElementById('payloadModal');
             var modalPayload = document.getElementById('modal-payload');
             var modalResponse = document.getElementById('modal-response');
+            var errorSummary = document.getElementById('modal-error-summary');
+            var errorMeta = document.getElementById('modal-error-meta');
+            var errorList = document.getElementById('modal-error-list');
             
-            if (!modal || !modalPayload || !modalResponse) return;
+            if (!modal || !modalPayload || !modalResponse || !errorSummary || !errorMeta || !errorList) return;
             
             // Populate modal content
+            var responseJson = null;
             try {
                 modalPayload.textContent = payloadData && payloadData !== 'null' ? 
                     JSON.stringify(JSON.parse(payloadData), null, 2) : 
@@ -502,11 +548,126 @@ try {
             }
             
             try {
-                modalResponse.textContent = responseData && responseData !== 'null' ? 
-                    JSON.stringify(JSON.parse(responseData), null, 2) : 
+                responseJson = responseData && responseData !== 'null' ? JSON.parse(responseData) : null;
+                modalResponse.textContent = responseJson ?
+                    JSON.stringify(responseJson, null, 2) :
                     'No response recorded or response is not valid JSON.';
             } catch (e) {
                 modalResponse.textContent = 'Invalid JSON response data.';
+            }
+
+            function addIssue(issues, message, context) {
+                if (!message) return;
+                var text = context ? `${message} (${context})` : message;
+                issues.push(text);
+            }
+
+            function collectIssuesFromConflicts(conflicts, issues, contextPrefix) {
+                if (!Array.isArray(conflicts)) return;
+                conflicts.forEach(function(conflict) {
+                    var message = conflict.message || conflict.value || conflict.description;
+                    var object = conflict.object || conflict.uid || conflict.dataElement || '';
+                    var context = [contextPrefix, object].filter(Boolean).join(' ');
+                    addIssue(issues, message, context.trim());
+                });
+            }
+
+            function collectIssuesRecursive(node, issues, path, depth) {
+                if (!node || depth > 4) return;
+
+                if (Array.isArray(node)) {
+                    node.forEach(function(item, idx) {
+                        collectIssuesRecursive(item, issues, `${path}[${idx}]`, depth + 1);
+                    });
+                    return;
+                }
+
+                if (typeof node !== 'object') return;
+
+                if (node.message) addIssue(issues, node.message, path);
+                if (node.description) addIssue(issues, node.description, path);
+
+                if (node.conflicts) {
+                    collectIssuesFromConflicts(node.conflicts, issues, path);
+                }
+
+                if (node.errorReports && Array.isArray(node.errorReports)) {
+                    node.errorReports.forEach(function(report) {
+                        addIssue(issues, report.message || report.description, path);
+                    });
+                }
+
+                Object.keys(node).forEach(function(key) {
+                    collectIssuesRecursive(node[key], issues, path ? `${path}.${key}` : key, depth + 1);
+                });
+            }
+
+            // Build error summary
+            var issues = [];
+            var metaParts = [];
+            errorList.innerHTML = '';
+
+            if (responseJson) {
+                if (responseJson.httpStatus) metaParts.push('HTTP ' + responseJson.httpStatus);
+                if (responseJson.status) metaParts.push('Status: ' + responseJson.status);
+                if (responseJson.message) addIssue(issues, responseJson.message, 'message');
+
+                if (responseJson.validationReport && Array.isArray(responseJson.validationReport.errorReports)) {
+                    responseJson.validationReport.errorReports.forEach(function(report) {
+                        addIssue(issues, report && report.message, 'validationReport');
+                    });
+                }
+
+                if (Array.isArray(responseJson.errorReports)) {
+                    responseJson.errorReports.forEach(function(report) {
+                        addIssue(issues, report && report.message, 'errorReports');
+                    });
+                }
+
+                if (Array.isArray(responseJson.importSummaries)) {
+                    responseJson.importSummaries.forEach(function(summary) {
+                        if (summary.status) addIssue(issues, summary.status, 'importSummary');
+                        if (summary.description) addIssue(issues, summary.description, 'importSummary');
+                        if (summary.conflicts) {
+                            collectIssuesFromConflicts(summary.conflicts, issues, 'importSummary');
+                        }
+                    });
+                }
+
+                if (responseJson.bundleReport && responseJson.bundleReport.typeReportMap) {
+                    Object.keys(responseJson.bundleReport.typeReportMap).forEach(function(typeKey) {
+                        var typeReport = responseJson.bundleReport.typeReportMap[typeKey];
+                        if (typeReport && Array.isArray(typeReport.objectReports)) {
+                            typeReport.objectReports.forEach(function(report) {
+                                if (report.errorReports) {
+                                    report.errorReports.forEach(function(err) {
+                                        addIssue(issues, err.message, typeKey);
+                                    });
+                                }
+                            });
+                        }
+                    });
+                }
+
+                collectIssuesRecursive(responseJson, issues, '', 0);
+            }
+
+            if (issues.length > 0) {
+                errorMeta.textContent = metaParts.join(' · ');
+                issues.slice(0, 20).forEach(function(issue) {
+                    var item = document.createElement('li');
+                    item.textContent = issue;
+                    errorList.appendChild(item);
+                });
+                if (issues.length > 20) {
+                    var more = document.createElement('li');
+                    more.textContent = `...and ${issues.length - 20} more issues`;
+                    errorList.appendChild(more);
+                }
+                errorSummary.style.display = 'block';
+            } else {
+                errorSummary.style.display = 'none';
+                errorMeta.textContent = '';
             }
             
             // Show modal with animation

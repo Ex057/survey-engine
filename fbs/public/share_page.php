@@ -162,6 +162,9 @@ error_log("QR Code Target URL: " . $qrCodeTargetUrl);
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <link rel="icon" href="/fbs/public/logo.jpeg?v=1" type="image/jpeg">
+    <link rel="shortcut icon" href="/fbs/public/logo.jpeg?v=1" type="image/jpeg">
+    <link rel="apple-touch-icon" href="/fbs/public/logo.jpeg?v=1">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Share Survey: <?php echo htmlspecialchars($surveySettings['title_text'] ?? $defaultSurveyTitle); ?></title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -368,15 +371,34 @@ error_log("QR Code Target URL: " . $qrCodeTargetUrl);
             box-shadow: 0 2px 5px rgba(0, 123, 255, 0.2);
         }
 
-        .footer-note {
-            margin-top: 35px;
-            font-size: 15px;
-            color: #666;
-            text-align: center;
-            border-top: 1px solid #eee;
-            padding-top: 20px;
-            font-weight: 500;
+        .url-display {
+            margin-top: 16px;
+            padding: 12px 14px;
+            background: #ffffff;
+            border-radius: 10px;
+            border: 1px dashed #FCD116;
         }
+
+        .url-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .url-logo {
+            width: 26px;
+            height: 26px;
+            object-fit: contain;
+            flex-shrink: 0;
+        }
+
+        .url-text {
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            color: #3182ce;
+            word-break: break-all;
+        }
+
 
         /* Utility class for hiding elements */
         .hidden-element {
@@ -504,11 +526,15 @@ error_log("QR Code Target URL: " . $qrCodeTargetUrl);
             <a href="<?php echo htmlspecialchars($qrCodeTargetUrl); ?>" class="go-to-survey-button" target="_blank">
                 <i class="fas fa-external-link-alt"></i> Go to Survey Page
             </a>
+
+            <div class="url-display">
+                <div class="url-row">
+                    <img src="/fbs/public/logo.jpeg?v=1" alt="Logo" class="url-logo">
+                    <div class="url-text"><?= htmlspecialchars($qrCodeTargetUrl) ?></div>
+                </div>
+            </div>
         </div>
 
-        <div class="footer-note" id="footer-note-text" style="display: <?php echo ($surveySettings['show_footer_note_share'] ?? true) ? 'block' : 'none'; ?>;">
-            <?php echo htmlspecialchars($surveySettings['footer_note_text'] ?? 'Thank you for helping us improve our services.'); ?>
-        </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>

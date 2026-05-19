@@ -116,12 +116,20 @@ $defaultSettings = [
 ];
 
 $surveySettings = array_merge($defaultSettings, $surveySettings);
+
+$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+$requestUri = $_SERVER['REQUEST_URI'] ?? '';
+$currentUrl = $scheme . '://' . $host . $requestUri;
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <link rel="icon" href="/fbs/public/logo.jpeg?v=1" type="image/jpeg">
+    <link rel="shortcut icon" href="/fbs/public/logo.jpeg?v=1" type="image/jpeg">
+    <link rel="apple-touch-icon" href="/fbs/public/logo.jpeg?v=1">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Thank You - Tracker Data Submitted</title>
     <style>
@@ -302,6 +310,34 @@ $surveySettings = array_merge($defaultSettings, $surveySettings);
         .action-button.secondary:hover {
             background-color: #5a6268;
         }
+
+        .url-display {
+            margin-top: 20px;
+            padding: 12px 14px;
+            border: 1px dashed #FCD116;
+            border-radius: 10px;
+            background: #ffffff;
+        }
+
+        .url-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .url-logo {
+            width: 26px;
+            height: 26px;
+            object-fit: contain;
+            flex-shrink: 0;
+        }
+
+        .url-text {
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            color: #3182ce;
+            word-break: break-all;
+        }
         
         .submission-details {
             display: none;
@@ -345,15 +381,9 @@ $surveySettings = array_merge($defaultSettings, $surveySettings);
             color: #6c757d;
         }
         
-        .footer-text {
-            margin-top: 30px;
-            font-size: 14px;
-            color: #6c757d;
-            text-align: center;
-        }
         
         @media print {
-            .action-buttons, .footer-text {
+            .action-buttons {
                 display: none !important;
             }
             
@@ -453,6 +483,13 @@ $surveySettings = array_merge($defaultSettings, $surveySettings);
             <button class="action-button" id="viewDetailsBtn">View Submission Details</button>
             <button class="action-button secondary" id="printSummaryBtn">Print Summary</button>
         </div> -->
+
+        <div class="url-display">
+            <div class="url-row">
+                <img src="/fbs/public/logo.jpeg?v=1" alt="Logo" class="url-logo">
+                <div class="url-text"><?= htmlspecialchars($currentUrl) ?></div>
+            </div>
+        </div>
         
         <div class="submission-details" id="submissionDetails">
             <div class="details-section">
@@ -496,9 +533,6 @@ $surveySettings = array_merge($defaultSettings, $surveySettings);
             <?php endif; ?>
         </div>
         
-        <div class="footer-text">
-            Your data helps improve healthcare services. Thank you for your participation!
-        </div>
     </div>
 
     <script>

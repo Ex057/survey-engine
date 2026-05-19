@@ -5,6 +5,10 @@ session_start();
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
+if (!isset($_SESSION['dhis2_optionset_cache'])) {
+    $_SESSION['dhis2_optionset_cache'] = [];
+}
+
 // Redirect to login if not logged in
 if (!isset($_SESSION['admin_logged_in'])) {
     header("Location: login.php");
@@ -21,6 +25,7 @@ if (!isset($pdo)) {
 }
 
 require_once 'dhis2/dhis2_shared.php'; // Ensure this provides getDhis2Config() and dhis2_get()
+require_once 'dhis2/dataset_storage_service.php'; // Dataset metadata storage service
 require_once 'includes/question_helper.php'; // Question reusability functions
 
 $success_message = null;
@@ -312,23 +317,43 @@ function getProgramDetails($instance, $domain, $programId, $programType = null)
         }
     }
 
-    // Fetch option values for all option sets (for tracker/event programs)
-    foreach ($result['optionSets'] as $optionSetId => &$optionSet) {
-        $optionSetDetails = dhis2_get('optionSets/' . $optionSetId . '?fields=id,name,options[id,name,code]', $instance);
-        if (!empty($optionSetDetails['options'])) {
-            $optionSet['options'] = $optionSetDetails['options'];
-
-            // Add options to data elements and attributes
-            foreach ($result['dataElements'] as $deId => &$de) {
-                if (!empty($de['optionSet']) && $de['optionSet']['id'] === $optionSetId) {
-                    $de['options'] = $optionSetDetails['options'];
+    // Fetch option values for all option sets (for tracker/event programs ONLY)
+    // Skip this for aggregate datasets as they use category combos, not option sets
+    if ($domain !== 'aggregate') {
+        foreach ($result['optionSets'] as $optionSetId => &$optionSet) {
+            $cacheKey = $instance . ':' . $optionSetId;
+            $cached = $_SESSION['dhis2_optionset_cache'][$cacheKey] ?? null;
+            if ($cached && ($cached['expires_at'] ?? 0) > time()) {
+                $optionSetDetails = $cached['data'];
+            } else {
+                $optionSetDetails = dhis2_get('optionSets/' . $optionSetId . '?fields=id,name,options[id,name,code]', $instance);
+                if ($optionSetDetails) {
+                    $_SESSION['dhis2_optionset_cache'][$cacheKey] = [
+                        'data' => $optionSetDetails,
+                        'expires_at' => time() + 3600
+                    ];
                 }
             }
 
-            foreach ($result['attributes'] as $attrId => &$attr) {
-                if (!empty($attr['optionSet']) && $attr['optionSet']['id'] === $optionSetId) {
-                    $attr['options'] = $optionSetDetails['options'];
+            // Check if option set was fetched successfully (handle 404 errors for missing option sets)
+            if ($optionSetDetails && !empty($optionSetDetails['options'])) {
+                $optionSet['options'] = $optionSetDetails['options'];
+
+                // Add options to data elements and attributes
+                foreach ($result['dataElements'] as $deId => &$de) {
+                    if (!empty($de['optionSet']) && $de['optionSet']['id'] === $optionSetId) {
+                        $de['options'] = $optionSetDetails['options'];
+                    }
                 }
+
+                foreach ($result['attributes'] as $attrId => &$attr) {
+                    if (!empty($attr['optionSet']) && $attr['optionSet']['id'] === $optionSetId) {
+                        $attr['options'] = $optionSetDetails['options'];
+                    }
+                }
+            } else {
+                // Option set not found or has no options - log warning but continue
+                error_log("[SB.PHP] Warning: Option set {$optionSetId} not found in DHIS2 or has no options. Skipping.");
             }
         }
     }
@@ -407,6 +432,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $domain = $_POST['domain'] ?? null;
             $programType = $_POST['program_type'] ?? null;
 
+            // For aggregate domain, set program_type to 'aggregate'
+            if ($domain === 'aggregate') {
+                $programType = 'aggregate';
+            }
+
             // Re-fetch program details for full data for DB insertion
             // Ensure getProgramDetails is updated to fetch 'formName' for data elements
             $programDetails = getProgramDetails(
@@ -441,8 +471,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // 1. Create survey entry
             $surveyDisplayName = $programName;
 
+            // For aggregate, dhis2_program_uid should be NULL (only program_dataset is used)
+            $dhis2ProgramUid = ($domain === 'aggregate') ? null : $programId;
+
             $stmt = $pdo->prepare("INSERT INTO survey (name, type, dhis2_instance, program_dataset, dhis2_tracked_entity_type_uid, dhis2_program_uid, program_type, domain_type) VALUES (?, 'dhis2', ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$surveyDisplayName, $dhis2Instance, $programId, $dhis2TrackedEntityTypeUid, $programId, $programType, $domain]);
+            $stmt->execute([$surveyDisplayName, $dhis2Instance, $programId, $dhis2TrackedEntityTypeUid, $dhis2ProgramUid, $programType, $domain]);
             $surveyId = $pdo->lastInsertId();
             $position = 1; // Initialize position for survey_question order
 
@@ -577,7 +610,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // --- END REORDERED LOGIC ---
 
             $pdo->commit();
-            $success_message = "Survey successfully created from DHIS2 program";
+
+            // Auto-sync dataset metadata for aggregate datasets
+            if ($domain === 'aggregate' && $programType === 'aggregate') {
+                try {
+                    error_log("[SB.PHP] Auto-syncing dataset metadata for survey {$surveyId}, dataset {$programId}");
+
+                    $syncResult = DatasetStorageService::storeDatasetMetadata($surveyId, $programId, $dhis2Instance);
+
+                    if ($syncResult['success']) {
+                        error_log("[SB.PHP] Dataset metadata synced successfully: " . $syncResult['message']);
+                        $success_message = "Survey successfully created from DHIS2 dataset and metadata synced to local database";
+                    } else {
+                        error_log("[SB.PHP] Dataset metadata sync failed: " . $syncResult['message']);
+                        $success_message = "Survey created but metadata sync failed: " . $syncResult['message'];
+                    }
+                } catch (Exception $e) {
+                    error_log("[SB.PHP] Error during auto-sync: " . $e->getMessage());
+                    error_log("[SB.PHP] Stack trace: " . $e->getTraceAsString());
+                    $success_message = "Survey created but auto-sync encountered an error: " . $e->getMessage();
+                }
+            } else {
+                $success_message = "Survey successfully created from DHIS2 program";
+            }
 
         } // End of elseif (isset($_POST['create_survey']))
 
@@ -817,36 +872,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 1 && $_GET['survey_source'] == 'dhi
                                                 <?php endif; ?>
                                             </div>
                                         <?php elseif ($_GET['domain'] == 'aggregate'): ?>
-                                            <?php
-                                            $deCategoryCombo = null;
-                                            try {
-                                                $deDetails = dhis2_get('dataElements/' . $deId . '?fields=categoryCombo[id,name,categoryOptionCombos[id,name]]', $_GET['dhis2_instance']);
-                                                if (!empty($deDetails['categoryCombo'])) {
-                                                    $deCategoryCombo = $deDetails['categoryCombo'];
-                                                }
-                                            } catch (Exception $e) {
-                                                $deCategoryCombo = null;
-                                            }
-                                            ?>
-                                            <?php if (!empty($deCategoryCombo) && (empty($deCategoryCombo['name']) || !preg_match('/default/i', $deCategoryCombo['name']))): ?>
-                                                <div>
-                                                    <small>Category Combination: <?= htmlspecialchars($deCategoryCombo['name']) ?></small>
-                                                    <?php if (!empty($deCategoryCombo['categoryOptionCombos'])): ?>
-                                                        <div class="mt-2">
-                                                            <small>Category Option Combos:</small>
-                                                            <div class="mt-2">
-                                                                <?php foreach ($deCategoryCombo['categoryOptionCombos'] as $catOptCombo): ?>
-                                                                    <span class="option-item"><?= htmlspecialchars($catOptCombo['name']) ?></span>
-                                                                <?php endforeach; ?>
-                                                            </div>
-                                                        </div>
-                                                    <?php endif; ?>
-                                                </div>
-                                            <?php else: ?>
-                                                <div>
-                                                    <small>No specific category combination for this data element.</small>
-                                                </div>
-                                            <?php endif; ?>
+                                            <div>
+                                                <small class="text-muted">Dataset data element - details loaded after creation</small>
+                                            </div>
                                         <?php endif; ?>
                                     </div>
                                 </div>
@@ -928,7 +956,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 1 && $_GET['survey_source'] == 'dhi
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Create New Survey</title>
-   <link rel="icon" type="image/png" href="argon-dashboard-master/assets/img/webhook-icon.png">
+  <link rel="icon" href="favicon.ico" type="image/x-icon">
+  <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
   <link href="argon-dashboard-master/assets/css/nucleo-icons.css" rel="stylesheet">
   <link href="argon-dashboard-master/assets/css/nucleo-svg.css" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
@@ -946,6 +975,14 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 1 && $_GET['survey_source'] == 'dhi
       background-color: #f9f9f9;
       margin: 0;
       padding: 0;
+    }
+    .card {
+      border-radius: 16px;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+    }
+    .card-body {
+      padding: 2rem;
     }
     h1, h2 {
       color: var(--primary-color);
@@ -987,8 +1024,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 1 && $_GET['survey_source'] == 'dhi
       background-color: #fff;
       border-radius: 10px;
       padding: 20px;
-      box-shadow: 0 0 15px rgba(0,0,0,0.1);
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
       margin-bottom: 30px;
+    }
+    #dhis2-survey-container {
+      min-height: 220px;
     }
     .preview-section {
       margin-bottom: 25px;
@@ -1454,12 +1494,25 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 1 && $_GET['survey_source'] == 'dhi
                     </div>
                   <script>
                   // Simple working DHIS2 form loader
-                  function loadDHIS2SurveyForm(params = {}) {
+                  function buildDHIS2Url(params) {
                     let url = 'sb.php?survey_source=dhis2';
                     if (params.dhis2_instance) url += '&dhis2_instance=' + encodeURIComponent(params.dhis2_instance);
                     if (params.domain) url += '&domain=' + encodeURIComponent(params.domain);
                     if (params.program_type) url += '&program_type=' + encodeURIComponent(params.program_type);
                     if (params.program_id) url += '&program_id=' + encodeURIComponent(params.program_id);
+                    return url;
+                  }
+
+                  function loadDHIS2SurveyForm(params = {}) {
+                    const url = buildDHIS2Url(params);
+                    const cacheKey = 'sb_dhis2_preview_' + btoa(url);
+                    const cached = sessionStorage.getItem(cacheKey);
+                    if (cached) {
+                      document.getElementById('dhis2-survey-container').innerHTML = cached;
+                      bindDhis2SelectHandlers();
+                      initializeSelectionControls();
+                      return;
+                    }
 
                     document.getElementById('dhis2-survey-container').innerHTML = '<div class=\"text-center py-5\"><div class=\"spinner-border text-primary\" role=\"status\"></div><p class=\"mt-3\">Loading DHIS2 details...</p></div>';
                     
@@ -1474,37 +1527,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 1 && $_GET['survey_source'] == 'dhi
                         return res.text();
                     })
                     .then(html => {
+                      sessionStorage.setItem(cacheKey, html);
                       document.getElementById('dhis2-survey-container').innerHTML = html;
-                      
-                      // Reattach event listeners
-                      let instanceSel = document.getElementById('dhis2-instance-select');
-                      if (instanceSel) instanceSel.onchange = function() {
-                        loadDHIS2SurveyForm({dhis2_instance: this.value});
-                      };
-                      let domainSel = document.getElementById('domain-select');
-                      if (domainSel) domainSel.onchange = function() {
-                        loadDHIS2SurveyForm({
-                          dhis2_instance: document.getElementById('dhis2-instance-select').value,
-                          domain: this.value
-                        });
-                      };
-                      let programTypeSel = document.getElementById('program-type-select');
-                      if (programTypeSel) programTypeSel.onchange = function() {
-                        loadDHIS2SurveyForm({
-                          dhis2_instance: document.getElementById('dhis2-instance-select').value,
-                          domain: document.getElementById('domain-select').value,
-                          program_type: this.value
-                        });
-                      };
-                      let progSel = document.getElementById('program-select');
-                      if (progSel) progSel.onchange = function() {
-                        loadDHIS2SurveyForm({
-                          dhis2_instance: document.getElementById('dhis2-instance-select').value,
-                          domain: document.getElementById('domain-select').value,
-                          program_type: document.getElementById('program-type-select') ? document.getElementById('program-type-select').value : null,
-                          program_id: this.value
-                        });
-                      };
+                      bindDhis2SelectHandlers();
                       
                       // Initialize selection controls
                       initializeSelectionControls();
@@ -1537,6 +1562,37 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 1 && $_GET['survey_source'] == 'dhi
                         </div>
                       `;
                     });
+                  }
+
+                  function bindDhis2SelectHandlers() {
+                    let instanceSel = document.getElementById('dhis2-instance-select');
+                    if (instanceSel) instanceSel.onchange = function() {
+                      loadDHIS2SurveyForm({dhis2_instance: this.value});
+                    };
+                    let domainSel = document.getElementById('domain-select');
+                    if (domainSel) domainSel.onchange = function() {
+                      loadDHIS2SurveyForm({
+                        dhis2_instance: document.getElementById('dhis2-instance-select').value,
+                        domain: this.value
+                      });
+                    };
+                    let programTypeSel = document.getElementById('program-type-select');
+                    if (programTypeSel) programTypeSel.onchange = function() {
+                      loadDHIS2SurveyForm({
+                        dhis2_instance: document.getElementById('dhis2-instance-select').value,
+                        domain: document.getElementById('domain-select').value,
+                        program_type: this.value
+                      });
+                    };
+                    let progSel = document.getElementById('program-select');
+                    if (progSel) progSel.onchange = function() {
+                      loadDHIS2SurveyForm({
+                        dhis2_instance: document.getElementById('dhis2-instance-select').value,
+                        domain: document.getElementById('domain-select').value,
+                        program_type: document.getElementById('program-type-select') ? document.getElementById('program-type-select').value : null,
+                        program_id: this.value
+                      });
+                    };
                   }
 
                   function initializeSelectionControls() {

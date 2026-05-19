@@ -33,6 +33,8 @@ $stmt = $pdo->prepare("
     SELECT 'regular' as type, id FROM submission WHERE id = :submission_id
     UNION
     SELECT 'tracker' as type, id FROM tracker_submissions WHERE id = :submission_id
+    UNION
+    SELECT 'dataset' as type, id FROM dataset_submissions WHERE id = :submission_id
 ");
 $stmt->execute(['submission_id' => $submissionId]);
 $submissionType = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -58,7 +60,7 @@ if ($submissionType['type'] === 'regular') {
     ");
     $stmt->execute(['submission_id' => $submissionId]);
     $submission = $stmt->fetch(PDO::FETCH_ASSOC);
-} else {
+} elseif ($submissionType['type'] === 'tracker') {
     // Tracker submission
     $stmt = $pdo->prepare("
         SELECT 
@@ -74,6 +76,28 @@ if ($submissionType['type'] === 'regular') {
         FROM tracker_submissions ts
         LEFT JOIN survey surv ON ts.survey_id = surv.id
         WHERE ts.id = :submission_id
+    ");
+    $stmt->execute(['submission_id' => $submissionId]);
+    $submission = $stmt->fetch(PDO::FETCH_ASSOC);
+} elseif ($submissionType['type'] === 'dataset') {
+    $stmt = $pdo->prepare("
+        SELECT 
+            ds.id,
+            ds.uid,
+            COALESCE(du.org_unit_display_name, du.org_unit_name, ds.orgunit_uid) AS location_name,
+            surv.name AS survey_name,
+            ds.submitted_at as created,
+            'dataset' as submission_type,
+            ds.survey_id,
+            ds.dataset_uid,
+            ds.period,
+            ds.data_values
+        FROM dataset_submissions ds
+        LEFT JOIN dataset_org_units du
+            ON du.survey_id = ds.survey_id
+            AND du.org_unit_uid = ds.orgunit_uid
+        LEFT JOIN survey surv ON ds.survey_id = surv.id
+        WHERE ds.id = :submission_id
     ");
     $stmt->execute(['submission_id' => $submissionId]);
     $submission = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -214,6 +238,55 @@ if ($submission['submission_type'] === 'regular') {
                 $stageCounter++;
             }
         }
+    }
+}
+
+if ($submission['submission_type'] === 'dataset') {
+    $dataValues = json_decode($submission['data_values'], true);
+    if (!is_array($dataValues)) {
+        $dataValues = [];
+    }
+
+    $deMap = [];
+    $cocMap = [];
+
+    $deStmt = $pdo->prepare("
+        SELECT data_element_uid, COALESCE(display_name, data_element_name) AS name
+        FROM dataset_data_elements
+        WHERE survey_id = ?
+    ");
+    $deStmt->execute([$submission['survey_id']]);
+    foreach ($deStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $deMap[$row['data_element_uid']] = $row['name'];
+    }
+
+    $cocStmt = $pdo->prepare("
+        SELECT data_element_uid, coc_uid, COALESCE(coc_display_name, coc_name) AS name
+        FROM dataset_category_option_combos
+        WHERE survey_id = ?
+    ");
+    $cocStmt->execute([$submission['survey_id']]);
+    foreach ($cocStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $cocMap[$row['data_element_uid'] . '.' . $row['coc_uid']] = $row['name'];
+    }
+
+    foreach ($dataValues as $dv) {
+        $deId = $dv['dataElement'] ?? '';
+        $cocId = $dv['categoryOptionCombo'] ?? '';
+        if ($deId === '') {
+            continue;
+        }
+        $deName = $deMap[$deId] ?? "Data Element ($deId)";
+        $label = $deName;
+        if ($cocId !== '') {
+            $cocName = $cocMap[$deId . '.' . $cocId] ?? $cocId;
+            $label = $deName . ' (' . $cocName . ')';
+        }
+        $groupedResponses[$deId . ($cocId ? "_$cocId" : '')] = [
+            'question_text' => $label,
+            'question_type' => 'dataset',
+            'responses' => [$dv['value'] ?? '']
+        ];
     }
 }
 ?>

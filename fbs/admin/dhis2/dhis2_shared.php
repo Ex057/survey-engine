@@ -2,6 +2,9 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
+// Increase memory limit for DHIS2 API calls (some responses can be very large)
+ini_set('memory_limit', '512M');
+
 require_once __DIR__.'/../connect.php';
 
 /**

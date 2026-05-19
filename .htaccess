@@ -2,15 +2,19 @@ RewriteEngine On
 RewriteBase /
 
 # Rule for regular surveys
-RewriteRule ^s/([0-9]+)$ fbs/public/survey_page.php?survey_id=$1 [L]
-RewriteRule ^share/s/([0-9]+)$ fbs/public/share_page.php?survey_id=$1 [L]
+RewriteRule ^s/([0-9]+)$ fbs/public/survey_page.php?survey_id=$1 [L,QSD]
+RewriteRule ^share/s/([0-9]+)$ fbs/public/share_page.php?survey_id=$1 [L,QSD]
 
 # Rule for tracker programs
-RewriteRule ^t/([0-9]+)$ fbs/public/tracker_program_form.php?survey_id=$1 [L]
-RewriteRule ^share/t/([0-9]+)$ fbs/public/tracker_share.php?survey_id=$1 [L]
+RewriteRule ^t/([0-9]+)$ fbs/public/tracker_program_form.php?survey_id=$1 [L,QSD]
+RewriteRule ^share/t/([0-9]+)$ fbs/public/tracker_share.php?survey_id=$1 [L,QSD]
 
 # Rule for tracker submission endpoint
 RewriteRule ^t/tracker_program_submit.php$ fbs/public/tracker_program_submit.php [L]
+
+# Rule for aggregate datasets
+RewriteRule ^d/([0-9]+)$ fbs/public/dataset_form.php?survey_id=$1 [L,QSD]
+RewriteRule ^share/d/([0-9]+)$ fbs/public/dataset_share.php?survey_id=$1 [L,QSD]
 
 # Thank you page URLs
 RewriteRule ^thank-you/([a-zA-Z0-9]+)$ fbs/public/thank_you_simple.php?uid=$1 [L]
@@ -18,6 +22,9 @@ RewriteRule ^thank-you/([a-zA-Z0-9]+)$ fbs/public/thank_you_simple.php?uid=$1 [L
 # Tracker success page - support both UID format and old survey_id format
 RewriteRule ^tracker-success/([a-zA-Z0-9_-]+)$ fbs/public/tracker_program_success.php?uid=$1 [L]
 RewriteRule ^tracker-success/([0-9]+)/([0-9]+)$ fbs/public/tracker_program_success.php?survey_id=$1&submission_id=$2 [L]
+
+# Dataset success page
+RewriteRule ^dataset-success/([0-9]+)$ fbs/public/dataset_success.php?submission_id=$1 [L]
 
 # Handle /fbs/ directory requests - auto-append .php for admin pages
 RewriteCond %{REQUEST_URI} ^/fbs/

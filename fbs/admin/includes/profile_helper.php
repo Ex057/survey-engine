@@ -65,6 +65,10 @@ function handleProfileImageUpload($file, $userId, $pdo) {
     
     // Move uploaded file
     if (move_uploaded_file($file['tmp_name'], $filepath)) {
+        // Resize for faster loading if GD is available
+        if (function_exists('imagecreatetruecolor')) {
+            resizeProfileImage($filepath, 240, 240);
+        }
         // Update database
         try {
             // First, try to add the profile_image column if it doesn't exist
@@ -96,5 +100,71 @@ function handleProfileImageUpload($file, $userId, $pdo) {
     } else {
         return ['success' => false, 'message' => 'Failed to upload file.'];
     }
+}
+
+/**
+ * Resize and crop profile image to a square thumbnail.
+ *
+ * @param string $filepath
+ * @param int $targetWidth
+ * @param int $targetHeight
+ * @return void
+ */
+function resizeProfileImage($filepath, $targetWidth, $targetHeight) {
+    $info = getimagesize($filepath);
+    if (!$info) {
+        return;
+    }
+
+    $mime = $info['mime'] ?? '';
+    switch ($mime) {
+        case 'image/jpeg':
+        case 'image/jpg':
+            $source = imagecreatefromjpeg($filepath);
+            break;
+        case 'image/png':
+            $source = imagecreatefrompng($filepath);
+            break;
+        case 'image/gif':
+            $source = imagecreatefromgif($filepath);
+            break;
+        default:
+            return;
+    }
+
+    if (!$source) {
+        return;
+    }
+
+    $srcWidth = imagesx($source);
+    $srcHeight = imagesy($source);
+    $size = min($srcWidth, $srcHeight);
+    $srcX = (int)(($srcWidth - $size) / 2);
+    $srcY = (int)(($srcHeight - $size) / 2);
+
+    $target = imagecreatetruecolor($targetWidth, $targetHeight);
+    if ($mime === 'image/png' || $mime === 'image/gif') {
+        imagecolortransparent($target, imagecolorallocatealpha($target, 0, 0, 0, 127));
+        imagealphablending($target, false);
+        imagesavealpha($target, true);
+    }
+
+    imagecopyresampled($target, $source, 0, 0, $srcX, $srcY, $targetWidth, $targetHeight, $size, $size);
+
+    switch ($mime) {
+        case 'image/jpeg':
+        case 'image/jpg':
+            imagejpeg($target, $filepath, 85);
+            break;
+        case 'image/png':
+            imagepng($target, $filepath, 6);
+            break;
+        case 'image/gif':
+            imagegif($target, $filepath);
+            break;
+    }
+
+    imagedestroy($source);
+    imagedestroy($target);
 }
 ?>

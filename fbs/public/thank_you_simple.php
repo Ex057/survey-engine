@@ -88,12 +88,20 @@ try {
 } catch (PDOException $e) {
     error_log("Database error fetching submission responses: " . $e->getMessage());
 }
+
+$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+$requestUri = $_SERVER['REQUEST_URI'] ?? '';
+$currentUrl = $scheme . '://' . $host . $requestUri;
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <link rel="icon" href="/fbs/public/logo.jpeg?v=1" type="image/jpeg">
+    <link rel="shortcut icon" href="/fbs/public/logo.jpeg?v=1" type="image/jpeg">
+    <link rel="apple-touch-icon" href="/fbs/public/logo.jpeg?v=1">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Thank You - Survey Submitted</title>
     <style>
@@ -151,6 +159,34 @@ try {
             font-family: monospace;
             font-size: 20px;
             color: #495057;
+        }
+
+        .url-display {
+            margin-top: 20px;
+            padding: 12px 14px;
+            border: 1px dashed #FCD116;
+            border-radius: 10px;
+            background: #ffffff;
+        }
+
+        .url-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .url-logo {
+            width: 26px;
+            height: 26px;
+            object-fit: contain;
+            flex-shrink: 0;
+        }
+
+        .url-text {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #3182ce;
+            word-break: break-all;
         }
         
         .action-buttons {
@@ -225,15 +261,9 @@ try {
             color: #6c757d;
         }
         
-        .footer-text {
-            margin-top: 30px;
-            font-size: 14px;
-            color: #6c757d;
-            text-align: center;
-        }
         
         @media print {
-            .action-buttons, .footer-text {
+            .action-buttons {
                 display: none !important;
             }
             
@@ -288,6 +318,13 @@ try {
         <div class="reference-id">
             <div>Your Reference ID:</div>
             <strong><?php echo htmlspecialchars($uid); ?></strong>
+        </div>
+
+        <div class="url-display">
+            <div class="url-row">
+                <img src="/fbs/public/logo.jpeg?v=1" alt="Logo" class="url-logo">
+                <div class="url-text"><?= htmlspecialchars($currentUrl) ?></div>
+            </div>
         </div>
         
         <div class="action-buttons">
@@ -350,9 +387,6 @@ try {
             </div>
         </div>
         
-        <div class="footer-text">
-            Your responses help us improve our services. Thank you for your participation!
-        </div>
     </div>
 
     <script>

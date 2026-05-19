@@ -273,7 +273,7 @@ $notificationCount = count($notifications);
                             getUserProfileImage($_SESSION['admin_id'], $pdo) : 
                             "argon-dashboard-master/assets/img/ship.jpg";
                         ?>
-                        <img src="<?php echo htmlspecialchars($profileImagePath); ?>" alt="User" class="avatar-img" loading="lazy">
+                        <img src="<?php echo htmlspecialchars($profileImagePath); ?>" alt="User" class="avatar-img" loading="lazy" decoding="async" fetchpriority="low" width="40" height="40">
                         <div class="avatar-status"></div>
                     </div>
                     <div class="d-none d-lg-flex flex-column text-start">
@@ -285,7 +285,7 @@ $notificationCount = count($notifications);
                 <ul class="dropdown-menu dropdown-menu-end navbar-dropdown" aria-labelledby="userDropdown">
                     <li class="dropdown-header">
                         <div class="d-flex align-items-center">
-                            <img src="argon-dashboard-master/assets/img/ship.jpg" alt="User" class="rounded-circle me-3" style="width: 40px; height: 40px; object-fit: cover;" loading="lazy">
+                            <img src="<?php echo htmlspecialchars($profileImagePath); ?>" alt="User" class="rounded-circle me-3" style="width: 40px; height: 40px; object-fit: cover;" loading="lazy" decoding="async" fetchpriority="low" width="40" height="40">
                             <div>
                                 <div class="fw-semibold"><?= $_SESSION['admin_username'] ?? 'Admin' ?></div>
                                 <small class="text-muted">Administrator</small>
@@ -374,12 +374,12 @@ $notificationCount = count($notifications);
         left: 260px; /* Adjust this value to match your sidebar width */
         right: 0;
         z-index: 1050;
-        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 50%, #f1f5f9 100%) !important;
+        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
         backdrop-filter: blur(20px);
         border-bottom: 1px solid rgba(0, 0, 0, 0.1);
         padding: 0.875rem 1.5rem;
         min-height: 75px;
-        box-shadow: 0 4px 25px rgba(0, 0, 0, 0.15) !important;
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12) !important;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
     

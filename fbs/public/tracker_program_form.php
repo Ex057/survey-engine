@@ -37,11 +37,18 @@ function showSurveyMessage($title, $message, $type = 'info') {
             $bgClass = 'bg-primary-subtle';
             $textClass = 'text-primary-emphasis';
     }
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $requestUri = $_SERVER['REQUEST_URI'] ?? '';
+    $currentUrl = $scheme . '://' . $host . $requestUri;
     ?>
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
+    <link rel="icon" href="/fbs/public/logo.jpeg?v=1" type="image/jpeg">
+    <link rel="shortcut icon" href="/fbs/public/logo.jpeg?v=1" type="image/jpeg">
+    <link rel="apple-touch-icon" href="/fbs/public/logo.jpeg?v=1">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title><?= htmlspecialchars($title) ?></title>
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -174,7 +181,7 @@ function fetchFromDHIS2($endpoint, $dhis2Config) {
 }
 
 // Fetch tracker program structure from DHIS2 with option set IDs
-$trackerProgram = fetchFromDHIS2("programs/{$survey['dhis2_program_uid']}.json?fields=id,name,description,programType,trackedEntityType,programStages[id,name,description,repeatable,minDaysFromStart,programStageSections[id,name,sortOrder,dataElements[id,name,displayName,valueType,optionSet[id,options[code,displayName]]]],programStageDataElements[dataElement[id,name,displayName,valueType,optionSet[id,options[code,displayName]]]]],programTrackedEntityAttributes[trackedEntityAttribute[id,name,displayName,valueType,unique,optionSet[id,options[code,displayName]]],mandatory,displayInList]", $dhis2Config);
+$trackerProgram = fetchFromDHIS2("programs/{$survey['dhis2_program_uid']}.json?fields=id,name,description,programType,trackedEntityType,programStages[id,name,description,repeatable,minDaysFromStart,programStageSections[id,name,sortOrder,dataElements[id,name,displayName,valueType,optionSet[id,options[code,displayName]]]],programStageDataElements[compulsory,dataElement[id,name,displayName,valueType,optionSet[id,options[code,displayName]]]]],programTrackedEntityAttributes[trackedEntityAttribute[id,name,displayName,valueType,unique,optionSet[id,options[code,displayName]]],mandatory,displayInList]", $dhis2Config);
 
 // Function to get option set values from local database
 function getLocalOptionSetValues($optionSetId) {
@@ -470,6 +477,34 @@ if (!empty($programStages)) {
             min-height: 100vh;
             margin: 0;
             font-size: 14px;
+        }
+
+        .url-display {
+            margin-top: 16px;
+            padding: 10px 12px;
+            border: 1px dashed #FCD116;
+            border-radius: 10px;
+            background: #ffffff;
+        }
+
+        .url-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .url-logo {
+            width: 24px;
+            height: 24px;
+            object-fit: contain;
+            flex-shrink: 0;
+        }
+
+        .url-text {
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            color: #3182ce;
+            word-break: break-all;
         }
         
         /* Header Styles */
@@ -2383,6 +2418,24 @@ if (!empty($programStages)) {
             resize: vertical;
             min-height: calc(1.5em + 0.75rem + 2px);
         }
+
+        /* Submission validation error styles */
+        .input-error {
+            border-color: #dc3545 !important;
+            box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.15);
+        }
+
+        .form-check-input.input-error {
+            outline: 2px solid rgba(220, 53, 69, 0.35);
+            outline-offset: 2px;
+        }
+
+        .input-error-message {
+            color: #dc3545;
+            font-size: 0.85rem;
+            margin-top: 6px;
+            line-height: 1.3;
+        }
         
         /* Number input styling */
         input[type="number"].form-control {
@@ -3158,6 +3211,8 @@ if (!empty($programStages)) {
                     }
                 })();
             }
+
+            invalidateReviewValidation();
         };
         
         // Stage management functions
@@ -3450,13 +3505,20 @@ if (!empty($programStages)) {
                 <div id="summaryReport">
                     <!-- Summary will be populated by JavaScript -->
                 </div>
+                <div id="reviewValidationStatus" class="text-muted small mt-3">
+                    Not validated yet. Click "Validate" before submitting.
+                </div>
             </div>
             <div class="action-buttons">
                 <button type="button" class="btn btn-outline" onclick="navigateToStep('data-entry')">
                     <i class="fas fa-arrow-left"></i>
                     Back to Data Entry
                 </button>
-                <button type="button" class="btn btn-primary" onclick="submitAllData()" id="finalSubmitBtn">
+                <button type="button" class="btn btn-outline-primary" onclick="validateReviewStep()" id="validateReviewBtn">
+                    <i class="fas fa-check-circle"></i>
+                    Validate
+                </button>
+                <button type="button" class="btn btn-primary" onclick="submitAllData()" id="finalSubmitBtn" disabled>
                     <i class="fas fa-paper-plane"></i>
                     Submit 
                 </button>
@@ -3911,6 +3973,8 @@ if (!empty($programStages)) {
             if (nextBtn) {
                 nextBtn.disabled = false;
             }
+
+            invalidateReviewValidation();
         }
         
         async function updateLocationDisplay(facilityId, facilityName, facilityPath = '') {
@@ -4447,7 +4511,10 @@ if (!empty($programStages)) {
                     
                     // Update step status when TEI attributes change
                     updateAllStepStatuses();
+                    invalidateReviewValidation();
                 });
+
+                inputElement.addEventListener('input', invalidateReviewValidation);
                 
                 // Create input hint
                 const inputHint = document.createElement('div');
@@ -4744,6 +4811,12 @@ if (!empty($programStages)) {
                     return value !== undefined && value !== '' && value !== null;
                 });
             });
+        }
+
+        function isDataElementCompulsory(stage, dataElementId) {
+            if (!stage || !stage.programStageDataElements) return false;
+            const match = stage.programStageDataElements.find(psde => psde?.dataElement?.id === dataElementId);
+            return !!(match && match.compulsory);
         }
 
         function getStageOccurrences(stageId) {
@@ -5490,6 +5563,12 @@ if (!empty($programStages)) {
              <div class="form-help">By default the current date is picked unless modified by user</div>
             `;
             modalContainer.appendChild(eventDateGroup);
+
+            const eventDateInput = eventDateGroup.querySelector('input');
+            if (eventDateInput) {
+                eventDateInput.addEventListener('input', invalidateReviewValidation);
+                eventDateInput.addEventListener('change', invalidateReviewValidation);
+            }
             
             // Add separator
             const separator = document.createElement('hr');
@@ -5557,6 +5636,8 @@ if (!empty($programStages)) {
                 // Clean the display name by removing prefixes like PM_, TP_, etc.
                 let cleanName = dataElement.displayName || dataElement.name;
                 cleanName = cleanName.replace(/^[A-Z]{2,3}_/i, '');
+
+                const isCompulsory = isDataElementCompulsory(stage, dataElement.id);
                 
                 // Create input using HTML string generation
                 const inputId = `stage_${stageId}_${dataElement.id}`;
@@ -5599,7 +5680,9 @@ if (!empty($programStages)) {
                 
                 // Universal side-by-side layout for all question types
                 formGroup.innerHTML = `
-                    <label class="form-label" for="${inputId}">${cleanName}</label>
+                    <label class="form-label" for="${inputId}">
+                        ${cleanName} ${isCompulsory ? '<span class="required-indicator">*</span>' : ''}
+                    </label>
                     <div class="answer-area">
                         ${inputHTML}
                         <div class="input-hint">${helpText}</div>
@@ -5608,6 +5691,10 @@ if (!empty($programStages)) {
                 
                 // After creating the form group with innerHTML, get references to the actual input elements for value setting
                 const actualInputElement = formGroup.querySelector('input, select, textarea');
+                if (actualInputElement) {
+                    actualInputElement.dataset.stageId = stageId;
+                    actualInputElement.dataset.occurrence = String(occurrence);
+                }
                 
                 // Load saved value if exists
                 const savedStageData = formData.stages?.[stageId];
@@ -5666,6 +5753,21 @@ if (!empty($programStages)) {
                         if (lngInput) lngInput.value = savedValue.longitude;
                     }
                 }
+
+                // Apply required rules after inputs are created
+                if (isCompulsory) {
+                    if (dataElement.valueType === 'COORDINATE') {
+                        const latInput = formGroup.querySelector('[name$="_lat"]');
+                        const lngInput = formGroup.querySelector('[name$="_lng"]');
+                        if (latInput) latInput.required = true;
+                        if (lngInput) lngInput.required = true;
+                    } else if (dataElement.valueType === 'TRUE_ONLY' && actualInputElement) {
+                        actualInputElement.required = true;
+                        actualInputElement.dataset.requiredTrue = 'true';
+                    } else if (actualInputElement) {
+                        actualInputElement.required = true;
+                    }
+                }
                 
                 // Add file input preview functionality if it's a file input
                 if (dataElement.valueType === 'FILE_RESOURCE' && actualInputElement) {
@@ -5694,7 +5796,13 @@ if (!empty($programStages)) {
                             const newFilePreviews = formGroup.querySelectorAll('.file-preview.new-file');
                             newFilePreviews.forEach(preview => preview.remove());
                         }
+                        invalidateReviewValidation();
                     });
+                }
+
+                if (actualInputElement) {
+                    actualInputElement.addEventListener('input', invalidateReviewValidation);
+                    actualInputElement.addEventListener('change', invalidateReviewValidation);
                 }
                 
                 questionsGrid.appendChild(formGroup);
@@ -5806,6 +5914,7 @@ if (!empty($programStages)) {
             
             // Update step status indicators
             updateAllStepStatuses();
+            invalidateReviewValidation();
             
             // Show success message
             showSuccessMessage(`Stage data saved successfully for ${isRepeatable ? `${currentOccurrence}` : 'stage'}`);
@@ -5876,6 +5985,9 @@ if (!empty($programStages)) {
                 
                 // Initialize step completion statuses
                 updateAllStepStatuses();
+
+                // Require validation before enabling submit
+                setReviewValidationState(false, 'Not validated yet. Click "Validate" before submitting.');
                 
                 console.log('Tracker form initialized successfully with new UI');
                 
@@ -5926,6 +6038,7 @@ if (!empty($programStages)) {
                 }, 500);
                 
                 console.log(`Added ${newCount} for stage ${stageId}`);
+                invalidateReviewValidation();
             };
             
             window.removeStageOccurrence = function(stageId, occurrence) {
@@ -5978,6 +6091,7 @@ if (!empty($programStages)) {
                     showSuccessMessage('Stage occurrence removed successfully');
                     
                     console.log(`Successfully removed occurrence ${occurrence} for stage ${stageId}`);
+                    invalidateReviewValidation();
                 }
             };
             
@@ -6023,22 +6137,25 @@ if (!empty($programStages)) {
             
             const loadingSpinner = document.getElementById('loadingSpinner');
             const submitBtn = document.querySelector('[onclick="submitAllData()"]') || document.getElementById('finalSubmitBtn');
+
+            if (!reviewValidated) {
+                showEnhancedErrorMessage(
+                    'Validation Required',
+                    'Please click "Validate" and fix any issues before submitting.',
+                    'error',
+                    7000
+                );
+                return;
+            }
+
+            const isValid = await validateBeforeSubmit();
+            if (!isValid) {
+                return;
+            }
             
             // Validate location selection
             const facilityId = document.getElementById('facilityId').value;
             const facilityOrgunitUid = document.getElementById('facilityOrgunitUid').value;
-            
-            if (!facilityId) {
-                alert('Please select a location before submitting.');
-                return;
-            }
-            
-            // Check for duplicate errors before submitting
-            const duplicateErrors = document.querySelectorAll('.duplicate-error');
-            if (duplicateErrors.length > 0) {
-                alert('Please resolve duplicate value errors before submitting. Check the highlighted fields.');
-                return;
-            }
             
             // Show loading state
             if (loadingSpinner) loadingSpinner.style.display = 'block';
@@ -6171,10 +6288,16 @@ if (!empty($programStages)) {
                 });
                 
                 // Submit to backend
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 45000);
+                
                 const response = await fetch('tracker_program_submit.php', {
                     method: 'POST',
-                    body: submissionFormData
+                    body: submissionFormData,
+                    signal: controller.signal
                 });
+                
+                clearTimeout(timeoutId);
                 
                 const result = await response.json();
                 
@@ -6194,10 +6317,22 @@ if (!empty($programStages)) {
                 if (loadingSpinner) loadingSpinner.style.display = 'none';
                 if (submitBtn) submitBtn.style.display = 'inline-block';
                 
+                if (error.name === 'AbortError') {
+                    showEnhancedErrorMessage(
+                        'Request Timeout',
+                        'The submission took too long and timed out. Please check your connection and try again. If this keeps happening, contact support.',
+                        'error',
+                        8000
+                    );
+                    return;
+                }
+                
                 // Handle specific DHIS2 errors with better UX
                 handleSubmissionError(error.message);
             }
         }
+
+        let reviewValidated = false;
 
         // Enhanced error handling for DHIS2 submission errors
         async function handleSubmissionError(errorMessage) {
@@ -6206,6 +6341,7 @@ if (!empty($programStages)) {
             // Check if it's a duplicate error
             if (errorMessage.includes('Duplicate Entry') || errorMessage.includes('Non-unique attribute value')) {
                 await handleDuplicateError(errorMessage);
+                return;
             } else if (errorMessage.includes('value_not_true_only')) {
                 showEnhancedErrorMessage(
                     'Data Validation Error', 
@@ -6224,6 +6360,358 @@ if (!empty($programStages)) {
                 // Generic error
                 showEnhancedErrorMessage('Submission Error', errorMessage, 'error', 8000);
             }
+
+            await focusServerValidationError(errorMessage);
+        }
+
+        async function validateReviewStep() {
+            const validateBtn = document.getElementById('validateReviewBtn');
+            if (validateBtn) validateBtn.disabled = true;
+
+            const isValid = await validateBeforeSubmit();
+            if (isValid) {
+                setReviewValidationState(true, 'Validation passed. You can now submit.');
+                showSuccessMessage('Validation passed. You can submit now.');
+            } else {
+                setReviewValidationState(false, 'Validation failed. Please fix the highlighted issues.');
+            }
+
+            if (validateBtn) validateBtn.disabled = false;
+        }
+
+        function setReviewValidationState(isValid, message) {
+            reviewValidated = isValid;
+            const submitBtn = document.getElementById('finalSubmitBtn');
+            const status = document.getElementById('reviewValidationStatus');
+
+            if (submitBtn) {
+                submitBtn.disabled = !isValid;
+            }
+            if (status) {
+                status.textContent = message;
+                status.className = isValid ? 'text-success small mt-3' : 'text-muted small mt-3';
+            }
+        }
+
+        function invalidateReviewValidation(reason = 'Form changed. Please validate again.') {
+            if (!reviewValidated) return;
+            setReviewValidationState(false, reason);
+        }
+
+        async function validateBeforeSubmit() {
+            clearValidationErrors();
+            const errors = collectValidationErrors();
+            if (errors.length === 0) return true;
+
+            showEnhancedErrorMessage(
+                'Validation Required',
+                `Please fix ${errors.length} issue${errors.length > 1 ? 's' : ''} before submitting. You will be taken to the first one.`,
+                'error',
+                7000
+            );
+
+            await focusValidationError(errors[0]);
+            return false;
+        }
+
+        function collectValidationErrors() {
+            const errors = [];
+
+            const facilityId = document.getElementById('facilityId')?.value;
+            if (!facilityId) {
+                errors.push({ type: 'location', message: 'Please select a location before submitting.' });
+            }
+
+            const duplicateErrorEl = document.querySelector('.duplicate-error');
+            if (duplicateErrorEl) {
+                errors.push({
+                    type: 'element',
+                    element: duplicateErrorEl,
+                    message: 'Please resolve duplicate value errors before submitting.'
+                });
+            }
+
+            const requiredAttrs = programData?.program?.programTrackedEntityAttributes?.filter(attr => attr.mandatory) || [];
+            requiredAttrs.forEach(attrConfig => {
+                const attrId = attrConfig.trackedEntityAttribute.id;
+                const value = formData.trackedEntityAttributes?.[attrId];
+                const inputElement = document.querySelector(`[data-attribute-id="${attrId}"]`);
+                const isFile = value && typeof value === 'object' && value.isFile;
+                const hasValue = isFile ? !!value.fileName : !!(value && String(value).trim());
+                if (!hasValue) {
+                    errors.push({
+                        type: 'attribute',
+                        attributeId: attrId,
+                        message: 'This field is required.',
+                        element: inputElement || null
+                    });
+                }
+            });
+
+            const participantInputs = document.querySelectorAll('#participantSection input, #participantSection select, #participantSection textarea');
+            participantInputs.forEach(input => {
+                if (!input.checkValidity() && (input.value || input.required)) {
+                    errors.push({
+                        type: 'element',
+                        element: input,
+                        message: input.validationMessage || 'Invalid value.'
+                    });
+                }
+            });
+
+            errors.push(...collectStageValidationErrors());
+
+            return errors;
+        }
+
+        function collectStageValidationErrors() {
+            const errors = [];
+            const stages = programData?.program?.programStages || [];
+
+            stages.forEach(stage => {
+                const stageData = formData.stages?.[stage.id];
+                if (!stageData) return;
+
+                const compulsoryIds = (stage.programStageDataElements || [])
+                    .filter(psde => psde.compulsory && psde.dataElement?.id)
+                    .map(psde => psde.dataElement.id);
+
+                if (compulsoryIds.length === 0) return;
+
+                const occurrences = getStageOccurrencesForValidation(stage, stageData);
+                occurrences.forEach(({ occurrence, data }) => {
+                    if (!data || !hasOccurrenceData(data)) return;
+
+                    if (!data.eventDate) {
+                        errors.push({
+                            type: 'eventDate',
+                            stageId: stage.id,
+                            occurrence,
+                            message: 'Event date is required.'
+                        });
+                    }
+
+                    compulsoryIds.forEach(dataElementId => {
+                        const value = data[dataElementId];
+                        const dataElement = stage.programStageDataElements.find(psde => psde?.dataElement?.id === dataElementId)?.dataElement;
+                        if (isEmptyStageValue(value, dataElement?.valueType)) {
+                            errors.push({
+                                type: 'dataElement',
+                                stageId: stage.id,
+                                occurrence,
+                                dataElementId,
+                                message: 'This field is required.'
+                            });
+                        }
+                    });
+                });
+            });
+
+            return errors;
+        }
+
+        function getStageOccurrencesForValidation(stage, stageData) {
+            const occurrenceKeys = Object.keys(stageData).filter(key => key.startsWith('occurrence_'));
+            if (stage.repeatable) {
+                return occurrenceKeys.map(key => ({
+                    occurrence: parseInt(key.split('_')[1], 10),
+                    data: stageData[key]
+                }));
+            }
+
+            if (occurrenceKeys.length > 0) {
+                return occurrenceKeys.map(key => ({
+                    occurrence: parseInt(key.split('_')[1], 10),
+                    data: stageData[key]
+                }));
+            }
+
+            return [{ occurrence: 1, data: stageData }];
+        }
+
+        function hasOccurrenceData(data) {
+            return Object.keys(data).some(key => {
+                if (key === 'eventDate') return false;
+                const value = data[key];
+                return value !== undefined && value !== null && value !== '';
+            });
+        }
+
+        function isEmptyStageValue(value, valueType) {
+            if (valueType === 'TRUE_ONLY') {
+                return value !== true && value !== 'true';
+            }
+
+            if (valueType === 'COORDINATE') {
+                return !value || value.latitude === undefined || value.longitude === undefined;
+            }
+
+            if (valueType === 'FILE_RESOURCE') {
+                return !value || !value.fileName;
+            }
+
+            return value === undefined || value === null || value === '';
+        }
+
+        function clearValidationErrors() {
+            document.querySelectorAll('.input-error').forEach(el => el.classList.remove('input-error'));
+            document.querySelectorAll('.input-error-message').forEach(el => el.remove());
+        }
+
+        function markInputError(inputElement, message) {
+            if (!inputElement) return;
+            inputElement.classList.add('input-error');
+
+            const existing = inputElement.closest('.answer-area')?.querySelector('.input-error-message');
+            if (existing) existing.remove();
+
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'input-error-message';
+            errorDiv.textContent = message;
+
+            const answerArea = inputElement.closest('.answer-area');
+            if (answerArea) {
+                answerArea.appendChild(errorDiv);
+            } else {
+                inputElement.parentNode.insertBefore(errorDiv, inputElement.nextSibling);
+            }
+        }
+
+        async function focusValidationError(error) {
+            if (!error) return;
+
+            if (error.type === 'location') {
+                await navigateToStep('location');
+                const facilitySearch = document.getElementById('facilitySearch');
+                if (facilitySearch) {
+                    facilitySearch.focus();
+                    markInputError(facilitySearch, error.message);
+                }
+                return;
+            }
+
+            if (error.type === 'attribute') {
+                await navigateToStep('participant');
+                const input = document.querySelector(`[data-attribute-id="${error.attributeId}"]`);
+                if (input) {
+                    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    input.focus();
+                    markInputError(input, error.message);
+                }
+                return;
+            }
+
+            if (error.type === 'dataElement' || error.type === 'eventDate') {
+                await openStageModalAndFocus(
+                    error.stageId,
+                    error.occurrence,
+                    error.type === 'dataElement' ? error.dataElementId : null,
+                    error.message,
+                    error.type === 'eventDate'
+                );
+                return;
+            }
+
+            if (error.element) {
+                const section = error.element.closest('.form-section');
+                if (section?.dataset?.step) {
+                    await navigateToStep(section.dataset.step);
+                }
+                error.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                error.element.focus();
+                markInputError(error.element, error.message);
+            }
+        }
+
+        async function openStageModalAndFocus(stageId, occurrence, dataElementId, message, isEventDate = false) {
+            await navigateToStep('data-entry');
+            openStageModal(stageId, occurrence);
+
+            setTimeout(() => {
+                const modal = document.getElementById('stageModal');
+                if (!modal) return;
+                let target;
+                if (isEventDate) {
+                    target = modal.querySelector('.event-date');
+                } else if (dataElementId) {
+                    target = modal.querySelector(`[data-de-id="${dataElementId}"]`);
+                }
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    target.focus();
+                    markInputError(target, message);
+                }
+            }, 400);
+        }
+
+        async function focusServerValidationError(errorMessage) {
+            const parsed = parseServerErrorDetails(errorMessage);
+            if (parsed.length === 0) return;
+            await focusValidationError(parsed[0]);
+        }
+
+        function parseServerErrorDetails(errorMessage) {
+            const details = [];
+
+            const attributeMatch = errorMessage.match(/attribute `([^`]+)`/i);
+            if (attributeMatch) {
+                details.push({
+                    type: 'attribute',
+                    attributeId: attributeMatch[1],
+                    message: errorMessage
+                });
+                return details;
+            }
+
+            const dataElementMatch =
+                errorMessage.match(/data element `([^`]+)`/i) ||
+                errorMessage.match(/dataElement `([^`]+)`/i) ||
+                errorMessage.match(/DataElement `([^`]+)`/i);
+
+            if (dataElementMatch) {
+                const dataElementId = dataElementMatch[1];
+                const location = findStageOccurrenceForDataElement(dataElementId);
+                if (location) {
+                    details.push({
+                        type: 'dataElement',
+                        stageId: location.stageId,
+                        occurrence: location.occurrence,
+                        dataElementId,
+                        message: errorMessage
+                    });
+                }
+            }
+
+            return details;
+        }
+
+        function findStageOccurrenceForDataElement(dataElementId) {
+            const stages = formData.stages || {};
+            for (const stageId of Object.keys(stages)) {
+                const stageData = stages[stageId];
+                const occurrenceKeys = Object.keys(stageData).filter(key => key.startsWith('occurrence_'));
+                for (const occKey of occurrenceKeys) {
+                    const occData = stageData[occKey];
+                    if (occData && occData.hasOwnProperty(dataElementId)) {
+                        return {
+                            stageId,
+                            occurrence: parseInt(occKey.split('_')[1], 10)
+                        };
+                    }
+                }
+                if (stageData && stageData.hasOwnProperty(dataElementId)) {
+                    return { stageId, occurrence: 1 };
+                }
+            }
+
+            const stageMatch = (programData?.program?.programStages || []).find(stage =>
+                stage.programStageDataElements?.some(psde => psde?.dataElement?.id === dataElementId)
+            );
+            if (stageMatch) {
+                return { stageId: stageMatch.id, occurrence: 1 };
+            }
+
+            return null;
         }
 
         // Handle duplicate error specifically

@@ -300,7 +300,279 @@ FormBase supports three types of survey forms, each with different capabilities 
 
 **Access:** Standard survey form interface with DHIS2 event submission
 
-### 3. Local Survey Forms
+### 3. DHIS2 Aggregate Dataset Forms
+
+**Overview:** These forms are based on DHIS2 Aggregate Data Sets for routine data collection and reporting. Designed for periodic data entry (monthly, quarterly, yearly) across multiple organization units.
+
+**Features:**
+- Period-based data collection (Daily, Weekly, Monthly, Quarterly, Yearly)
+- Organization unit (facility) selection with hierarchical search
+- Three form rendering types: Default, Section-based, and Custom HTML
+- Category combinations for disaggregation (e.g., Age/Gender breakdowns)
+- Dataset-level attributes (e.g., School Term, Data Set Type)
+- Option sets for dropdown selections
+- Validation rules from DHIS2
+- Load existing data from DHIS2 for updates
+- Automatic completion registration
+- Local caching for performance
+- Greyed/disabled fields support
+- Mobile-responsive design
+
+**Creation Steps:**
+
+1. **Configure DHIS2 Connection:**
+   - Navigate to Admin Panel → Settings → DHIS2 Configuration
+   - Ensure your DHIS2 instance is configured with proper credentials
+   - Test the connection
+
+2. **Create New Survey:**
+   - Go to Admin Panel → Survey Management → Create New Survey
+   - Select "DHIS2 Aggregate Dataset" as the survey type
+   - Choose your configured DHIS2 instance
+   - Select the Dataset from the dropdown (fetched from DHIS2)
+   - Save the survey
+
+3. **Sync Dataset Metadata:**
+   - Navigate to Admin Panel → Dataset Preview
+   - Click "Sync Metadata" button
+   - System fetches and stores locally:
+     - Dataset basic info (name, description, period type)
+     - Data elements organized by sections
+     - Category combinations and disaggregations
+     - Option sets with values
+     - Organization units assigned to the dataset
+     - Validation rules
+     - Custom HTML forms (if configured in DHIS2)
+   - Metadata cached for fast form loading
+
+4. **Configure Form Layout:**
+   - In Dataset Preview, customize appearance:
+     - Toggle flag bar display (Uganda flag colors)
+     - Configure data element visibility
+     - Set custom display order
+     - Mark fields as required
+     - Filter organization units by instance/hierarchy level
+   - Save layout settings
+
+5. **Preview & Test:**
+   - Use the live preview panel to see the form
+   - Test facility search functionality
+   - Try different period selections
+   - Test "Load Existing Data" feature
+   - Verify validation rules
+   - Check category combinations render correctly
+
+6. **Deploy:**
+   - Activate the survey
+   - Share the dataset URL: `/d/{survey_id}`
+   - Users can now submit data to DHIS2
+
+**Access:**
+- Public form: `/d/{survey_id}` (e.g., `http://yoursite.com/d/20`)
+- Share page: `/share/d/{survey_id}` (QR code generation)
+- Admin preview: `fbs/admin/dataset_preview.php?survey_id={survey_id}`
+
+**Technical Architecture:**
+
+**Database Tables:**
+- `surveys` - Main survey/dataset configuration
+- `dataset_metadata` - Basic dataset info (name, period type, form type)
+- `dataset_data_elements` - Data elements with value types
+- `dataset_category_option_combos` - Disaggregations (Age, Gender, etc.)
+- `dataset_option_sets` & `dataset_option_values` - Dropdown options
+- `dataset_attribute_categories` - Dataset-level attributes
+- `dataset_org_units` - Facilities/organization units
+- `dataset_layout_settings` - Custom appearance settings
+- `dataset_dataelement_settings` - Per-element configuration
+- `dataset_submissions` - Submitted data with DHIS2 responses
+- `dataset_metadata_cache` - Performance cache (60 min TTL)
+
+**Form Rendering (Form Renderer Architecture):**
+
+The system uses three different renderers based on DHIS2 form configuration:
+
+1. **DefaultFormRenderer:**
+   - Simple flat list of data elements
+   - No section grouping
+   - Category combos shown in nested tables
+   - Best for small datasets (< 20 elements)
+
+2. **SectionFormRenderer:**
+   - Organizes data elements by sections
+   - Horizontal grid layout for category combinations:
+     ```
+     Data Element | Male | Female | Total
+     -------------|------|--------|------
+     Enrollment   | [  ] | [  ]   | [  ]
+     Dropout      | [  ] | [  ]   | [  ]
+     ```
+   - Vertical list layout option
+   - Best for medium-large datasets with logical grouping
+
+3. **CustomFormRenderer:**
+   - Parses DHIS2 custom HTML forms (`dataEntryForm`)
+   - Replaces DHIS2 placeholders with functional inputs:
+     - `{dataElementUid}-{categoryOptionComboUid}-val`
+     - `{dataElementUid}-val`
+   - Preserves custom styles, classes, JavaScript
+   - Supports complex layouts designed in DHIS2 maintenance app
+   - Best for highly customized forms with specific layouts
+
+**Data Flow:**
+
+1. **Form Load:**
+   - User visits `/d/{survey_id}`
+   - System loads metadata from LOCAL database (no API call)
+   - Renderer selected based on `formType`
+   - Form HTML generated with proper inputs
+
+2. **User Interaction:**
+   - Facility search: Queries local `dataset_org_units` table
+   - Period selection: Dynamic UI based on `periodType`
+   - Attribute selection: If dataset has non-default category combo
+   - Data entry gate: Data entry UI stays hidden until facility + period are selected
+   - Data entry: Inputs rendered based on `valueType`
+
+3. **Load Existing Data (Optional):**
+   - User clicks "Load Existing Data"
+   - System queries DHIS2: `/api/dataValueSets?dataSet={uid}&orgUnit={uid}&period={period}`
+   - Pre-fills form with existing values
+   - User can update and resubmit
+
+4. **Validation:**
+   - Client-side: HTML5 validation, required fields
+   - DHIS2 validation rules: Real-time evaluation
+     - Expressions: `#{dataElement.cocUid}`
+     - Operators: equal_to, greater_than, less_than, etc.
+   - Custom validation: Blocks submission if rules fail
+
+5. **Submission:**
+   - JavaScript collects all data values
+   - AJAX POST to `dataset_submit.php`
+   - Server validates and checks for existing data (unless client sends `is_update`)
+   - Submits to DHIS2: `/api/dataValueSets` (async mode supported)
+   - Marks dataset complete: `/api/completeDataSetRegistrations` (can be skipped on updates)
+   - Saves locally in `dataset_submissions`
+   - Redirects to success page: `/dataset-success/{submission_id}`
+
+**DHIS2 Integration:**
+
+**Metadata Sync:**
+- Fetches complete dataset structure from DHIS2
+- Endpoint: `/api/dataSets/{uid}.json?fields=[complex field list]`
+- Stores in local tables for fast rendering
+- Updates on admin trigger (no automatic sync)
+
+**Data Submission:**
+- Submits to `/api/dataValueSets` endpoint
+- Payload format:
+  ```json
+  {
+    "dataSet": "datasetUid",
+    "period": "202401",
+    "orgUnit": "orgUnitUid",
+    "completeDate": "2024-01-15",
+    "attributeOptionCombo": "aocUid",
+    "dataValues": [
+      {
+        "dataElement": "deUid1",
+        "value": "100",
+        "categoryOptionCombo": "cocUid1"
+      }
+    ]
+  }
+  ```
+- Handles both new submissions and updates
+- Error logging to `dhis2_error_log` table
+
+**Authentication:**
+- HTTP Basic Auth or Bearer token
+- Per-instance configuration in `dhis2_instances` table
+- Credentials stored securely
+
+**Caching:**
+- Metadata cached for 60 minutes
+- Form loading uses local data (zero API calls)
+- Only submission and "load existing" hit DHIS2
+- Massive performance improvement for field users
+
+**Advanced Features:**
+
+1. **Category Combinations:**
+   - Automatic disaggregation by Age, Gender, etc.
+   - Horizontal grid or vertical list layouts
+   - Default category combo detection
+
+2. **Option Sets:**
+   - Dropdown selections from DHIS2
+   - Values submitted as codes, displayed as labels
+   - Lazy loading support
+
+3. **Greyed Fields:**
+   - DHIS2-configured disabled fields
+   - Rendered with `disabled` attribute
+   - Visual indication with `.greyed-field` class
+
+4. **Validation Rules:**
+   - Real-time JavaScript evaluation
+   - Supports complex expressions
+   - Visual feedback (red border on invalid)
+   - Blocks submission if validation fails
+
+5. **Section Autosave + Status Colors (SECTION forms only):**
+   - Each section header shows a status dot and text:
+     - Grey = not saved
+     - Yellow = changed (dirty)
+     - Cyan = saving
+     - Green = saved
+     - Red = save failed
+   - Autosave sends only that section’s data with `async_submit: true`
+   - Final Submit still sends the full payload
+   - Custom forms do not show per‑section status colors
+
+5. **Period Type Support:**
+   - Daily: Date picker
+   - Weekly: Year + Week number
+   - Monthly: Year + Month
+   - Quarterly: Year + Quarter
+   - Yearly/Financial: Year only
+   - Automatic DHIS2 format conversion
+
+6. **Custom Form Scripts:**
+   - Extracts JavaScript from DHIS2 custom forms
+   - Executes after form render
+   - Supports totals, conditionals, etc.
+   - Security: External scripts filtered
+
+**Best Practices:**
+
+1. **Sync Metadata Regularly:**
+   - Sync before major changes in DHIS2
+   - After adding new data elements
+   - After modifying option sets
+
+2. **Configure Layout Settings:**
+   - Hide unused data elements
+   - Order fields logically
+   - Mark critical fields as required
+
+3. **Test Thoroughly:**
+   - Test with different facilities
+   - Try various periods
+   - Test update functionality
+   - Verify validation rules
+
+4. **Monitor Submissions:**
+   - Check `dataset_submissions` table
+   - Review DHIS2 responses for errors
+   - Use `dhis2_error_log` for debugging
+
+5. **Performance:**
+   - Metadata cache reduces API calls
+   - Local storage enables offline-first design
+   - Organization unit search optimized with indexes
+
+### 4. Local Survey Forms
 
 **Overview:** Traditional survey forms stored locally in the database without DHIS2 integration.
 

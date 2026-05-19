@@ -25,9 +25,11 @@ try {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true);
         $optionSetId = $input['option_set_id'] ?? null;
+        $surveyId = $input['survey_id'] ?? null;
     } else {
         // GET request (for public tracker form)
         $optionSetId = $_GET['option_set_id'] ?? null;
+        $surveyId = $_GET['survey_id'] ?? null;
     }
     
     if (!$optionSetId) {
@@ -60,6 +62,21 @@ try {
             ORDER BY osv.id
         ");
         $stmt->execute([$optionSetId]);
+        $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    // Try dataset option sets (aggregate datasets) when survey_id is provided
+    if (empty($results) && !empty($surveyId)) {
+        error_log("get_option_set_values.php: No options found yet, trying dataset option set for survey {$surveyId}: " . $optionSetId);
+
+        $stmt = $pdo->prepare("
+            SELECT dov.option_display_name as displayName, dov.option_code as code
+            FROM dataset_option_sets dos
+            JOIN dataset_option_values dov ON dos.id = dov.option_set_id
+            WHERE dos.survey_id = ? AND dos.option_set_uid = ?
+            ORDER BY dov.sort_order
+        ");
+        $stmt->execute([$surveyId, $optionSetId]);
         $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
     

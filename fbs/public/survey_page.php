@@ -44,6 +44,9 @@ function showSurveyMessage($title, $message, $type = 'info') {
     <html lang="en">
     <head>
         <meta charset="UTF-8">
+    <link rel="icon" href="/fbs/public/logo.jpeg?v=1" type="image/jpeg">
+    <link rel="shortcut icon" href="/fbs/public/logo.jpeg?v=1" type="image/jpeg">
+    <link rel="apple-touch-icon" href="/fbs/public/logo.jpeg?v=1">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title><?= htmlspecialchars($title) ?></title>
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -260,6 +263,11 @@ $debugInfo = [
 ];
 error_log("Visibility Debug: " . json_encode($debugInfo));
 
+$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+$requestUri = $_SERVER['REQUEST_URI'] ?? '';
+$currentUrl = $scheme . '://' . $host . $requestUri;
+
 // Hierarchy Level Mapping (Fixed to Level X) - needed for display logic
 $hierarchyLevels = [];
 for ($i = 1; $i <= 8; $i++) {
@@ -358,6 +366,7 @@ unset($option);
             padding: 10px 0;
             box-sizing: border-box;
         }
+
         
         /* Dynamic Images Styling */
         .dynamic-images-container {

@@ -44,6 +44,34 @@ try {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['deploy_survey'])) {
         $surveyId = $_POST['survey_id'];
+
+        // Check survey type to determine routing
+        try {
+            $stmt = $pdo->prepare("SELECT type, program_type, dhis2_program_uid, program_dataset FROM survey WHERE id = ?");
+            $stmt->execute([$surveyId]);
+            $survey = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($survey) {
+                // Route based on program type
+                if ($survey['type'] === 'dhis2' && $survey['program_type'] === 'aggregate' && !empty($survey['program_dataset'])) {
+                    // Aggregate dataset - go to dataset preview
+                    header("Location: dataset_preview.php?survey_id=" . urlencode($surveyId));
+                    exit();
+                } elseif ($survey['type'] === 'dhis2' && $survey['program_type'] === 'tracker' && !empty($survey['dhis2_program_uid'])) {
+                    // Tracker program - go to tracker preview
+                    header("Location: tracker_preview.php?survey_id=" . urlencode($surveyId));
+                    exit();
+                } else {
+                    // Local survey or event - go to update_form
+                    header("Location: update_form.php?survey_id=" . urlencode($surveyId));
+                    exit();
+                }
+            }
+        } catch (PDOException $e) {
+            error_log("Error checking survey type: " . $e->getMessage());
+        }
+
+        // Fallback to update_form
         header("Location: update_form.php?survey_id=" . urlencode($surveyId));
         exit();
     }
@@ -109,8 +137,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Survey Management</title>
+    <!-- Favicon -->
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
     <!-- Argon Dashboard CSS -->
-    <link rel="icon" type="image/png" href="argon-dashboard-master/assets/img/webhook-icon.png">
 
     <link href="argon-dashboard-master/assets/css/nucleo-icons.css" rel="stylesheet">
     <link href="argon-dashboard-master/assets/css/nucleo-svg.css" rel="stylesheet">

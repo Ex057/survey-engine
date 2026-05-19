@@ -19,7 +19,7 @@ if (!$surveyId) {
 
 // Fetch survey details including survey name AND TYPE
 try {
-    $surveyStmt = $pdo->prepare("SELECT id, type, name FROM survey WHERE id = ?");
+    $surveyStmt = $pdo->prepare("SELECT id, type, name, program_type, dhis2_program_uid, program_dataset FROM survey WHERE id = ?");
     $surveyStmt->execute([$surveyId]);
     $survey = $surveyStmt->fetch(PDO::FETCH_ASSOC);
 
@@ -27,6 +27,19 @@ try {
         die("Survey not found.");
     }
     $surveyType = $survey['type']; // Get the survey type here
+
+    // Redirect DHIS2 surveys to their specific preview pages
+    if ($survey['type'] === 'dhis2') {
+        if ($survey['program_type'] === 'aggregate' && !empty($survey['program_dataset'])) {
+            // Aggregate dataset - redirect to dataset preview
+            header("Location: dataset_preview.php?survey_id=" . $surveyId);
+            exit();
+        } elseif ($survey['program_type'] === 'tracker' && !empty($survey['dhis2_program_uid'])) {
+            // Tracker program - redirect to tracker preview
+            header("Location: tracker_preview.php?survey_id=" . $surveyId);
+            exit();
+        }
+    }
 } catch (PDOException $e) {
     error_log("Database error fetching survey details: " . $e->getMessage());
     die("Error fetching survey details.");
@@ -1084,7 +1097,7 @@ try {
             max-width: 100% !important;
         }
         
-        .col-lg-5, .col-lg-7 {
+        .col-lg-4, .col-lg-8 {
             padding-left: 15px !important;
             padding-right: 15px !important;
             max-width: 100% !important;
@@ -1105,37 +1118,29 @@ try {
             overflow-x: hidden !important;
         }
         
-        /* Align content with navbar - use default Argon positioning */
+        /* Align content for header-only layout */
         .main-content {
             margin-left: 0 !important;
             padding-left: 0 !important;
             padding-right: 0 !important;
         }
         
-        /* Only affect the main content container, not navbar */
+        /* Only affect the main content container */
         .main-content .container-fluid {
-            padding-left: 16rem !important;
-            padding-right: 1rem !important;
+            padding-left: 1.5rem !important;
+            padding-right: 1.5rem !important;
             transition: padding-left 0.3s ease;
         }
         
-        /* Responsive behavior for sidebar collapse */
+        /* Keep consistent padding when sidebar is hidden */
         .g-sidenav-hidden .main-content .container-fluid {
-            padding-left: 1rem !important;
-        }
-        
-        /* Ensure smooth transitions for sidebar collapse */
-        body.g-sidenav-show .main-content {
-            transition: margin-left 0.3s ease;
-        }
-        
-        body.g-sidenav-hidden .main-content {
-            transition: margin-left 0.3s ease;
+            padding-left: 1.5rem !important;
         }
         
         @media (max-width: 1199.98px) {
             .main-content .container-fluid {
                 padding-left: 1rem !important;
+                padding-right: 1rem !important;
             }
         }
         
@@ -1143,8 +1148,8 @@ try {
             border: 1px solid #e9ecef !important;
             border-radius: 10px !important;
             box-shadow: 0 4px 15px rgba(0,0,0,0.1) !important;
-            margin-left: 1rem !important;
-            margin-right: 1rem !important;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
         }
         
         /* Let Argon handle the sidebar positioning naturally */
@@ -1226,16 +1231,67 @@ try {
             font-size: 14px;
             font-weight: 600;
         }
+
+        /* Dataset-style layout adjustments */
+        body.preview-page {
+            background: #f8f9fa;
+        }
+
+        .preview-header {
+            background: linear-gradient(135deg, #4a5568, #718096);
+            color: white;
+            padding: 20px 0;
+            margin-bottom: 24px;
+        }
+
+        .preview-header h1 {
+            font-size: 1.5rem;
+            margin: 0;
+            font-weight: 700;
+        }
+
+        .preview-header p {
+            margin: 0;
+            opacity: 0.85;
+        }
+
+        body.preview-page .sidenav,
+        body.preview-page .navbar-vertical,
+        body.preview-page .main-content .navbar {
+            display: none !important;
+        }
+
+        body.preview-page .main-content {
+            margin-left: 0 !important;
+            padding-top: 0;
+        }
+
+        body.preview-page .main-content .container-fluid {
+            padding-top: 0;
+        }
     </style>
 </head>
-<body class="g-sidenav-show bg-gray-100">
+<body class="g-sidenav-show bg-gray-100 preview-page">
     <?php include 'components/aside.php'; ?>
+    <div class="preview-header">
+        <div class="container">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1><i class="fas fa-clipboard-list me-2"></i><?= $defaultSurveyTitle ?></h1>
+                    <p>Survey Preview & Settings</p>
+                </div>
+                <a href="main.php" class="btn btn-light">
+                    <i class="fas fa-arrow-left me-2"></i>Back to Admin
+                </a>
+            </div>
+        </div>
+    </div>
     
     <main class="main-content position-relative border-radius-lg">
         <?php include 'components/navbar.php'; ?>
         
-        <div class="container-fluid py-4">
-            <div class="row">
+        <div class="container-fluid px-4 pb-4">
+            <div class="row g-3">
                 <div class="col-lg-4">
                     <div class="card">
                         <div class="card-header">
@@ -1521,7 +1577,7 @@ try {
                     </div>
                 </div>
                 
-                <div class="col-lg-7">
+                <div class="col-lg-8">
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <h4 class="mb-0"><?php echo htmlspecialchars($defaultSurveyTitle); ?> - Preview</h4>
@@ -1544,7 +1600,6 @@ try {
             </div>
 
            <h2 id="survey-title" data-translate="title"><?php echo htmlspecialchars($surveySettings['title_text'] ?? ''); ?></h2>
-            <h3 id="survey-subtitle" data-translate="client_satisfaction_tool"><?php echo $translations['client_satisfaction_tool'] ?? 'CLIENT SATISFACTION FEEDBACK TOOL'; ?></h3>
                <p class="subheading" id="survey-subheading" data-translate="subheading">
                     <?php echo htmlspecialchars($surveySettings['subheading_text'] ?? ''); ?>
                 </p>

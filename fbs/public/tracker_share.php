@@ -155,6 +155,9 @@ error_log("Tracker QR Code Target URL: " . $qrCodeTargetUrl);
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <link rel="icon" href="/fbs/public/logo.jpeg?v=1" type="image/jpeg">
+    <link rel="shortcut icon" href="/fbs/public/logo.jpeg?v=1" type="image/jpeg">
+    <link rel="apple-touch-icon" href="/fbs/public/logo.jpeg?v=1">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Share Tracker Program: <?php echo htmlspecialchars($surveySettings['title_text'] ?? $defaultSurveyTitle); ?></title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -447,6 +450,41 @@ error_log("Tracker QR Code Target URL: " . $qrCodeTargetUrl);
             gap: 15px;
         }
 
+        .url-display {
+            margin-top: 20px;
+            padding: 12px 14px;
+            background: white;
+            border-radius: 10px;
+            border: 2px dashed var(--primary-color);
+            width: 100%;
+        }
+
+        .url-label {
+            font-weight: 600;
+            color: var(--primary-color);
+            margin-bottom: 6px;
+        }
+
+        .url-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .url-logo {
+            width: 28px;
+            height: 28px;
+            object-fit: contain;
+            flex-shrink: 0;
+        }
+
+        .url-text {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            color: var(--info-color);
+            word-break: break-all;
+        }
+
         .instructions .icon {
             font-size: 40px;
             background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
@@ -502,15 +540,6 @@ error_log("Tracker QR Code Target URL: " . $qrCodeTargetUrl);
             transform: translateY(-1px);
         }
 
-        .footer-note {
-            margin-top: 35px;
-            font-size: 15px;
-            color: #666;
-            text-align: center;
-            border-top: 2px solid #eee;
-            padding-top: 20px;
-            font-weight: 500;
-        }
 
         .hidden-element {
             display: none !important;
@@ -645,11 +674,17 @@ error_log("Tracker QR Code Target URL: " . $qrCodeTargetUrl);
                     <i class="fas fa-copy"></i> Copy Link
                 </button>
             </div>
+            <div class="url-display">
+                <div class="url-label">
+                    <i class="fas fa-link me-2"></i>Direct Link
+                </div>
+                <div class="url-row">
+                    <img src="/fbs/public/logo.jpeg?v=1" alt="Logo" class="url-logo">
+                    <div class="url-text"><?= htmlspecialchars($qrCodeTargetUrl) ?></div>
+                </div>
+            </div>
         </div>
 
-        <div class="footer-note" id="footer-note-text" style="display: <?php echo ($surveySettings['show_footer_note_share'] ?? true) ? 'block' : 'none'; ?>;">
-            <?php echo htmlspecialchars($surveySettings['footer_note_text'] ?? 'Thank you for participating in our data collection program.'); ?>
-        </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>

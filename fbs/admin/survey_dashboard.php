@@ -39,9 +39,10 @@ try {
     $totalStmt = $pdo->prepare("
         SELECT 
             (SELECT COUNT(*) FROM submission WHERE survey_id = ?) + 
-            (SELECT COUNT(*) FROM tracker_submissions WHERE survey_id = ?) as total
+            (SELECT COUNT(*) FROM tracker_submissions WHERE survey_id = ?) +
+            (SELECT COUNT(*) FROM dataset_submissions WHERE survey_id = ?) as total
     ");
-    $totalStmt->execute([$surveyId, $surveyId]);
+    $totalStmt->execute([$surveyId, $surveyId, $surveyId]);
     $stats['total_submissions'] = $totalStmt->fetchColumn();
     
     // Get breakdown by submission type
@@ -52,32 +53,39 @@ try {
     $trackerStmt = $pdo->prepare("SELECT COUNT(*) FROM tracker_submissions WHERE survey_id = ?");
     $trackerStmt->execute([$surveyId]);
     $stats['tracker_submissions'] = $trackerStmt->fetchColumn();
+
+    $datasetStmt = $pdo->prepare("SELECT COUNT(*) FROM dataset_submissions WHERE survey_id = ?");
+    $datasetStmt->execute([$surveyId]);
+    $stats['dataset_submissions'] = $datasetStmt->fetchColumn();
     
     // Submissions today (including both types)
     $todayStmt = $pdo->prepare("
         SELECT 
             (SELECT COUNT(*) FROM submission WHERE survey_id = ? AND DATE(created) = CURDATE()) + 
-            (SELECT COUNT(*) FROM tracker_submissions WHERE survey_id = ? AND DATE(submitted_at) = CURDATE()) as today
+            (SELECT COUNT(*) FROM tracker_submissions WHERE survey_id = ? AND DATE(submitted_at) = CURDATE()) +
+            (SELECT COUNT(*) FROM dataset_submissions WHERE survey_id = ? AND DATE(submitted_at) = CURDATE()) as today
     ");
-    $todayStmt->execute([$surveyId, $surveyId]);
+    $todayStmt->execute([$surveyId, $surveyId, $surveyId]);
     $stats['today_submissions'] = $todayStmt->fetchColumn();
     
     // Submissions this week (including both types)
     $weekStmt = $pdo->prepare("
         SELECT 
             (SELECT COUNT(*) FROM submission WHERE survey_id = ? AND WEEK(created) = WEEK(NOW())) + 
-            (SELECT COUNT(*) FROM tracker_submissions WHERE survey_id = ? AND WEEK(submitted_at) = WEEK(NOW())) as week
+            (SELECT COUNT(*) FROM tracker_submissions WHERE survey_id = ? AND WEEK(submitted_at) = WEEK(NOW())) +
+            (SELECT COUNT(*) FROM dataset_submissions WHERE survey_id = ? AND WEEK(submitted_at) = WEEK(NOW())) as week
     ");
-    $weekStmt->execute([$surveyId, $surveyId]);
+    $weekStmt->execute([$surveyId, $surveyId, $surveyId]);
     $stats['week_submissions'] = $weekStmt->fetchColumn();
     
     // Submissions this month (including both types)
     $monthStmt = $pdo->prepare("
         SELECT 
             (SELECT COUNT(*) FROM submission WHERE survey_id = ? AND MONTH(created) = MONTH(NOW()) AND YEAR(created) = YEAR(NOW())) + 
-            (SELECT COUNT(*) FROM tracker_submissions WHERE survey_id = ? AND MONTH(submitted_at) = MONTH(NOW()) AND YEAR(submitted_at) = YEAR(NOW())) as month
+            (SELECT COUNT(*) FROM tracker_submissions WHERE survey_id = ? AND MONTH(submitted_at) = MONTH(NOW()) AND YEAR(submitted_at) = YEAR(NOW())) +
+            (SELECT COUNT(*) FROM dataset_submissions WHERE survey_id = ? AND MONTH(submitted_at) = MONTH(NOW()) AND YEAR(submitted_at) = YEAR(NOW())) as month
     ");
-    $monthStmt->execute([$surveyId, $surveyId]);
+    $monthStmt->execute([$surveyId, $surveyId, $surveyId]);
     $stats['month_submissions'] = $monthStmt->fetchColumn();
     
     // Average responses per submission
@@ -89,9 +97,13 @@ try {
             LEFT JOIN submission_response sr ON s.id = sr.submission_id 
             WHERE s.survey_id = ? 
             GROUP BY s.id
+            UNION ALL
+            SELECT COALESCE(JSON_LENGTH(ds.data_values), 0) as response_count
+            FROM dataset_submissions ds
+            WHERE ds.survey_id = ?
         ) as response_counts
     ");
-    $avgStmt->execute([$surveyId]);
+    $avgStmt->execute([$surveyId, $surveyId]);
     $avgResult = $avgStmt->fetchColumn();
     $stats['avg_responses'] = round($avgResult ?? 0, 2);
     
@@ -102,7 +114,10 @@ try {
         'today_submissions' => 0,
         'week_submissions' => 0,
         'month_submissions' => 0,
-        'avg_responses' => 0
+        'avg_responses' => 0,
+        'regular_submissions' => 0,
+        'tracker_submissions' => 0,
+        'dataset_submissions' => 0
     ];
 }
 
@@ -129,7 +144,8 @@ try {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Survey Analytics Dashboard</title>
-    <link rel="icon" href="argon-dashboard-master/assets/img/brand/favicon.png" type="image/png">
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
     <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700" rel="stylesheet">
     <link href="argon-dashboard-master/assets/css/nucleo-icons.css" rel="stylesheet">
     <link href="argon-dashboard-master/assets/css/nucleo-svg.css" rel="stylesheet">
@@ -473,11 +489,12 @@ try {
                     <div class="stat-card">
                         <div class="stat-number text-primary"><?php echo number_format($stats['total_submissions']); ?></div>
                         <div class="stat-label">Total Submissions</div>
-                        <?php if ($survey['type'] == 'dhis2' && $stats['tracker_submissions'] > 0): ?>
+                        <?php if ($survey['type'] == 'dhis2' && ($stats['tracker_submissions'] > 0 || $stats['dataset_submissions'] > 0)): ?>
                         <div class="mt-2">
                             <small class="text-muted">
                                 Regular: <?php echo number_format($stats['regular_submissions']); ?> | 
-                                Tracker: <?php echo number_format($stats['tracker_submissions']); ?>
+                                Tracker: <?php echo number_format($stats['tracker_submissions']); ?> |
+                                Dataset: <?php echo number_format($stats['dataset_submissions']); ?>
                             </small>
                         </div>
                         <?php endif; ?>

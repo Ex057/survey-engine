@@ -14,9 +14,15 @@ try {
     // Validate request parameters
     $endpoint = $_GET['endpoint'] ?? '';
     $programs = $_GET['programs'] ?? '';
-    
-    if (empty($endpoint) || empty($programs)) {
-        throw new Exception('Missing required parameters: endpoint and programs');
+    $dataset = $_GET['dataset'] ?? '';
+
+    // For dataSets endpoint, 'dataset' parameter is required
+    if ($endpoint === 'dataSets/orgUnits') {
+        if (empty($dataset)) {
+            throw new Exception('Missing required parameter: dataset');
+        }
+    } elseif (empty($programs)) {
+        throw new Exception('Missing required parameters: endpoint and programs/dataset');
     }
     
     // Get DHIS2 instance key
@@ -39,6 +45,12 @@ try {
     if ($endpoint === 'programs/orgUnits') {
         $api_endpoint = "/api/programs/{$programs}/organisationUnits.json?fields=id,code,name,displayName,path,level,parent[id,name,displayName],ancestors[id,name,displayName]&paging=false";
         error_log("DHIS2 API endpoint: {$api_endpoint}");
+    } elseif ($endpoint === 'dataSets/orgUnits') {
+        // Handle dataset organization units
+        $datasetUid = $_GET['dataset'] ?? $programs; // Support both 'dataset' and 'programs' param
+        // Use minimal fields to avoid memory issues with large datasets
+        $api_endpoint = "/api/dataSets/{$datasetUid}/organisationUnits.json?fields=id,name,displayName&paging=false";
+        error_log("DHIS2 API endpoint for dataset: {$api_endpoint}");
     } else {
         throw new Exception('Unsupported endpoint');
     }

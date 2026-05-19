@@ -143,6 +143,7 @@ try {
         border: 4px solid rgba(59, 130, 246, 0.2);
         border-radius: 50%;
         object-fit: cover;
+        background: #f1f5f9;
         display: block;
         margin: 0 auto;
     }
@@ -191,7 +192,16 @@ try {
                 $profileImagePath = "uploads/profile_images/" . $user_data['profile_image'];
             }
             ?>
-            <img src="<?php echo htmlspecialchars($profileImagePath); ?>" alt="Profile" class="profile-avatar mb-4" id="profileImage" loading="lazy">
+            <img src="<?php echo htmlspecialchars($profileImagePath); ?>"
+                 alt="Profile"
+                 class="profile-avatar mb-4"
+                 id="profileImage"
+                 width="120"
+                 height="120"
+                 loading="eager"
+                 decoding="async"
+                 fetchpriority="high"
+                 onerror="this.onerror=null;this.src='argon-dashboard-master/assets/img/ship.jpg';">
             <h2 class="mb-2"><?php echo htmlspecialchars($user_data['username'] ?? 'Unknown User'); ?></h2>
             <p class="mb-0 text-muted">Administrator</p>
             <p class="text-muted small">Member since <?php echo date('F Y', strtotime($user_data['created_at'] ?? 'now')); ?></p>

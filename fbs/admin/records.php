@@ -37,16 +37,23 @@ if (!$surveyId) {
         SELECT 
             s.id, 
             s.name, 
-            (COALESCE(COUNT(DISTINCT sub.id), 0) + COALESCE(COUNT(DISTINCT ts.id), 0)) AS submission_count,
-            GREATEST(COALESCE(MAX(sub.created), '1970-01-01'), COALESCE(MAX(ts.submitted_at), '1970-01-01')) AS last_submission,
+            (COALESCE(COUNT(DISTINCT sub.id), 0) + COALESCE(COUNT(DISTINCT ts.id), 0) + COALESCE(COUNT(DISTINCT ds.id), 0)) AS submission_count,
+            GREATEST(
+                COALESCE(MAX(sub.created), '1970-01-01'),
+                COALESCE(MAX(ts.submitted_at), '1970-01-01'),
+                COALESCE(MAX(ds.submitted_at), '1970-01-01')
+            ) AS last_submission,
             COUNT(DISTINCT sub.id) as regular_count,
-            COUNT(DISTINCT ts.id) as tracker_count
+            COUNT(DISTINCT ts.id) as tracker_count,
+            COUNT(DISTINCT ds.id) as dataset_count
         FROM 
             survey s 
         LEFT JOIN 
             submission sub ON s.id = sub.survey_id 
         LEFT JOIN 
             tracker_submissions ts ON s.id = ts.survey_id
+        LEFT JOIN
+            dataset_submissions ds ON s.id = ds.survey_id
         GROUP BY 
             s.id, s.name
         ORDER BY 
@@ -128,9 +135,39 @@ if (!$surveyId) {
         $trackerStmt = $pdo->prepare($trackerSql);
         $trackerStmt->execute($trackerParams);
         $trackerSubmissions = $trackerStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        // Now get dataset submissions for the same survey
+        $datasetSql = "
+            SELECT
+                ds.id,
+                ds.uid,
+                COALESCE(du.org_unit_display_name, du.org_unit_name, ds.orgunit_uid) AS location_name,
+                ds.submitted_at as created,
+                COALESCE(JSON_LENGTH(ds.data_values), 0) AS response_count,
+                'dataset' as submission_type
+            FROM dataset_submissions ds
+            LEFT JOIN dataset_org_units du
+                ON du.survey_id = ds.survey_id
+                AND du.org_unit_uid = ds.orgunit_uid
+            WHERE ds.survey_id = :survey_id_dataset
+        ";
+
+        $datasetParams = ['survey_id_dataset' => $surveyId];
+        if (!empty($startDateParam)) {
+            $datasetSql .= " AND ds.submitted_at >= :start_date_dataset";
+            $datasetParams['start_date_dataset'] = $startDateParam . ' 00:00:00';
+        }
+        if (!empty($endDateParam)) {
+            $datasetSql .= " AND ds.submitted_at <= :end_date_dataset";
+            $datasetParams['end_date_dataset'] = $endDateParam . ' 23:59:59';
+        }
+
+        $datasetStmt = $pdo->prepare($datasetSql);
+        $datasetStmt->execute($datasetParams);
+        $datasetSubmissions = $datasetStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         
         // Combine both arrays
-        $submissions = array_merge($submissions, $trackerSubmissions);
+        $submissions = array_merge($submissions, $trackerSubmissions, $datasetSubmissions);
         
         // Sort by created date (most recent first)
         usort($submissions, function($a, $b) {
@@ -152,7 +189,8 @@ if (!$surveyId) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin - Survey Submissions</title>
-       <link rel="icon" type="image/png" href="argon-dashboard-master/assets/img/webhook-icon.png">
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
 
     <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700" rel="stylesheet">
     <link href="argon-dashboard-master/assets/css/nucleo-icons.css" rel="stylesheet">
@@ -807,7 +845,11 @@ if (!$surveyId) {
                                                             <span class="badge badge-sm bg-gradient-success"><?php echo $submission['response_count']; ?></span>
                                                         </td>
                                                         <td>
-                                                            <span class="badge badge-sm <?php echo $submission['submission_type'] === 'tracker' ? 'bg-gradient-info' : 'bg-gradient-primary'; ?> text-white">
+                                                            <span class="badge badge-sm <?php
+                                                                echo $submission['submission_type'] === 'tracker'
+                                                                    ? 'bg-gradient-info'
+                                                                    : ($submission['submission_type'] === 'dataset' ? 'bg-gradient-warning' : 'bg-gradient-primary');
+                                                            ?> text-white">
                                                                 <?php echo strtoupper($submission['submission_type']); ?>
                                                             </span>
                                                         </td>

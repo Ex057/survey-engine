@@ -53,7 +53,11 @@ $menuItems = [
              class="navbar-brand-img"
              alt="Survey Engine Logo"
              style="height: 60px; width: auto; max-width: 100%;"
-             loading="lazy">
+             width="60"
+             height="60"
+             loading="lazy"
+             decoding="async"
+             fetchpriority="high">
             <span class="ms-1 font-weight-bold d-block mt-2 text-dark" style="font-size: 1rem;">Admin Panel</span>
         </a>
     </div>
@@ -89,7 +93,11 @@ $menuItems = [
                              alt="User"
                              class="avatar-img rounded-circle border border-2 border-white"
                              style="width: 32px; height: 32px; object-fit: cover;"
-                             loading="lazy">
+                             width="32"
+                             height="32"
+                             loading="lazy"
+                             decoding="async"
+                             fetchpriority="low">
                     </div>
                     <div class="d-flex flex-column">
                         <span class="fw-bold text-dark"><?= $_SESSION['admin_username'] ?? 'Admin' ?></span>
@@ -116,6 +124,7 @@ $menuItems = [
         position: relative;
         overflow: hidden;
         border-right: 1px solid #e2e8f0;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
     }
     
     /* Remove pattern overlay for neutral design */
@@ -131,6 +140,10 @@ $menuItems = [
     .custom-sidenav-bg .nav-link {
         color: #4a5568 !important;
         transition: none;
+        margin: 0.25rem 0.75rem;
+        padding: 0.65rem 0.85rem;
+        border-radius: 10px;
+        position: relative;
     }
 
     .custom-sidenav-bg .nav-link:hover {
@@ -144,6 +157,17 @@ $menuItems = [
         color: #2d3748 !important;
         font-weight: bold;
         box-shadow: none;
+    }
+
+    .custom-sidenav-bg .nav-link.active::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 8px;
+        bottom: 8px;
+        width: 4px;
+        background: #2b6cb0;
+        border-radius: 4px;
     }
 
     /* Neutral Icon Styling within Sidenav */

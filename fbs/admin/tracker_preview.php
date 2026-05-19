@@ -198,6 +198,16 @@ $defaultSettings = [
 
 $surveySettings = array_merge($defaultSettings, $surveySettings);
 
+function resolveTrackerImageUrl(string $path): string {
+    if ($path === '') {
+        return '';
+    }
+    if (preg_match('#^https?://#i', $path) || strpos($path, '/') === 0) {
+        return $path;
+    }
+    return '/fbs/admin/' . ltrim($path, '/');
+}
+
 // Fetch distinct instance_keys for the dropdown
 $instanceKeys = [];
 try {
@@ -251,6 +261,8 @@ if (!empty($programStages)) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= htmlspecialchars($surveySettings['title_text']) ?> - Preview</title>
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="shortcut icon" href="favicon.ico" type="image/x-icon">
     <link href="argon-dashboard-master/assets/css/nucleo-icons.css" rel="stylesheet">
     <link href="argon-dashboard-master/assets/css/nucleo-svg.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
@@ -856,18 +868,70 @@ if (!empty($programStages)) {
             border-radius: 8px;
             background-color: #f8f9fa;
         }
+
+        /* Dataset-style layout adjustments */
+        body.preview-page {
+            background: #f8f9fa;
+        }
+
+        .preview-header {
+            background: linear-gradient(135deg, #4a5568, #718096);
+            color: white;
+            padding: 20px 0;
+            margin-bottom: 24px;
+        }
+
+        .preview-header h1 {
+            font-size: 1.5rem;
+            margin: 0;
+            font-weight: 700;
+        }
+
+        .preview-header p {
+            margin: 0;
+            opacity: 0.85;
+        }
+
+        body.preview-page .sidenav,
+        body.preview-page .navbar-vertical,
+        body.preview-page .main-content .navbar {
+            display: none !important;
+        }
+
+        body.preview-page .main-content {
+            margin-left: 0 !important;
+            padding-top: 0;
+        }
+
+        body.preview-page .main-content .container-fluid {
+            padding-top: 0;
+        }
     </style>
 </head>
 
-<body class="g-sidenav-show bg-gray-100">
+<body class="g-sidenav-show bg-gray-100 preview-page">
     <?php include 'components/aside.php'; ?>
+
+    <div class="preview-header">
+        <div class="container">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1><i class="fas fa-clipboard-check me-2"></i><?= htmlspecialchars($survey['name']) ?></h1>
+                    <p>Tracker Program Preview & Settings</p>
+                </div>
+                <a href="main.php" class="btn btn-light">
+                    <i class="fas fa-arrow-left me-2"></i>Back to Admin
+                </a>
+            </div>
+        </div>
+    </div>
     
     <main class="main-content position-relative border-radius-lg">
         <?php include 'components/navbar.php'; ?>
         
-        <div class="container-fluid py-4">
-            <div class="row">
-                <div class="col-lg-3">
+        <div class="container-fluid px-4 pb-4">
+            <div class="row g-3">
+                <div class="col-lg-4">
                     <div class="card">
                         <div class="card-header">
                             <h4 class="mb-0"><i class="fas fa-cog me-2"></i>Program Information</h4>
@@ -1189,9 +1253,9 @@ if (!empty($programStages)) {
                             <div class="preview-images-container <?= htmlspecialchars($surveySettings['layout_type']) ?>" id="previewImagesContainer">
                                 <?php foreach ($dynamicImages as $image): ?>
                                     <div class="preview-image-item position-<?= htmlspecialchars($image['position_type']) ?>">
-                                        <img src="<?= htmlspecialchars($image['image_path']) ?>?v=<?= time() ?>&id=<?= $image['image_order'] ?>&rnd=<?= mt_rand(1000,9999) ?>" 
+                                        <img src="<?= htmlspecialchars(resolveTrackerImageUrl($image['image_path'])) ?>?v=<?= time() ?>&id=<?= $image['image_order'] ?>&rnd=<?= mt_rand(1000,9999) ?>" 
                                              alt="<?= htmlspecialchars($image['image_alt_text']) ?>"
-                                             style="width: 50px; height: 35px; border-radius: 4px; object-fit: contain; border: 1px solid #ddd;"
+                                             style="width: <?= (int)($image['width_px'] ?? 50) ?>px; height: <?= (int)($image['height_px'] ?? 35) ?>px; border-radius: 4px; object-fit: contain; border: 1px solid #ddd;"
                                              onerror="console.error('Failed to load image:', this.src); this.style.border='1px solid red'; this.alt='❌';" 
                                              onload="console.log('Loaded image:', this.src);"
                                              title="<?= htmlspecialchars($image['image_alt_text']) ?>">
@@ -2428,7 +2492,7 @@ if (!empty($programStages)) {
             const imagePath = document.getElementById(`imagePath${imageNumber}`).value;
             if (imagePath) {
                 const previewImg = document.getElementById(`previewImg${imageNumber}`);
-                previewImg.src = `/fbs/admin/${imagePath}`;
+                previewImg.src = resolveImageUrl(imagePath);
                 document.getElementById(`imagePreview${imageNumber}`).style.display = 'block';
                 
                 previewImg.onerror = function() {
@@ -3073,13 +3137,18 @@ if (!empty($programStages)) {
                 let imagesHtml = `<div class="preview-images-container ${layoutType}" id="previewImagesContainer">`;
                 
                 images.forEach(image => {
+                    const position = image.position_type || image.position || 'center';
+                    const altText = image.image_alt_text || image.alt_text || '';
+                    const width = image.width_px || image.width || 50;
+                    const height = image.height_px || image.height || 35;
+                    const resolvedPath = resolveImageUrl(image.image_path || image.path || '');
                     imagesHtml += `
-                        <div class="preview-image-item position-${image.position_type}">
-                            <img src="${image.image_path}?v=${Date.now()}" 
-                                 alt="${image.image_alt_text}"
-                                 style="width: 50px; height: 35px; border-radius: 4px; object-fit: contain; border: 1px solid #ddd;"
+                        <div class="preview-image-item position-${position}">
+                            <img src="${resolvedPath}?v=${Date.now()}" 
+                                 alt="${altText}"
+                                 style="width: ${width}px; height: ${height}px; border-radius: 4px; object-fit: contain; border: 1px solid #ddd;"
                                  onerror="this.style.border='1px solid red'; this.alt='❌';" 
-                                 title="${image.image_alt_text}">
+                                 title="${altText}">
                         </div>
                     `;
                 });
@@ -3100,6 +3169,14 @@ if (!empty($programStages)) {
                 document.getElementById(colorInputId).value = hexValue;
                 updateFlagPreview();
             }
+        }
+
+        function resolveImageUrl(path) {
+            if (!path) return '';
+            if (/^https?:\/\//i.test(path) || path.startsWith('/')) {
+                return path;
+            }
+            return `/fbs/admin/${path.replace(/^\/+/, '')}`;
         }
         
         function resetToUgandaFlag() {
@@ -3154,6 +3231,29 @@ if (!empty($programStages)) {
                 
                 alert('Settings reset to defaults. Click "Save Settings" to apply.');
             }
+        }
+    </script>
+
+    <script>
+        // Fallback in case earlier script fails to define this
+        if (typeof window.toggleSettingsMode !== 'function') {
+            window.toggleSettingsMode = function () {
+                const settingsModeText = document.getElementById('settingsModeText');
+                const settingsInterface = document.getElementById('settingsInterface');
+                if (!settingsInterface || !settingsModeText) return;
+
+                const isVisible = settingsInterface.style.display !== 'none';
+                if (isVisible) {
+                    settingsModeText.textContent = 'Configure Settings';
+                    settingsInterface.style.display = 'none';
+                } else {
+                    settingsModeText.textContent = 'Hide Settings';
+                    settingsInterface.style.display = 'block';
+                    if (typeof window.loadTrackerSettings === 'function') {
+                        window.loadTrackerSettings();
+                    }
+                }
+            };
         }
     </script>
 </body>
