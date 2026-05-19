@@ -1,51 +1,85 @@
-name: Security Guard
+ name: Security Guard
 
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-  push:
-    branches: [main]
-  workflow_dispatch:
+  on:
+    pull_request:
+      types: [opened, synchronize, reopened]
+    push:
+      branches: [main]
+    workflow_dispatch:
 
-jobs:
-  guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+  jobs:
+    guard:
+      runs-on: ubuntu-latest
+      steps:
+        - name: Checkout
+          uses: actions/checkout@v4
+          with:
+            fetch-depth: 0
 
-      - name: Determine changed files
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            base="${{ github.event.pull_request.base.sha }}"
-            head="${{ github.event.pull_request.head.sha }}"
-          else
-            base="${{ github.event.before }}"
-            head="${{ github.sha }}"
-          fi
-          git diff --name-only "$base" "$head" > changed_files.txt || true
+        - name: Determine changed files
+          id: changes
+          shell: bash
+          run: |
+            set -euo pipefail
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              base="${{ github.event.pull_request.base.sha }}"
+              head="${{ github.event.pull_request.head.sha }}"
+            else
+              base="${{ github.event.before }}"
+              head="${{ github.sha }}"
+            fi
 
-      - name: Block suspicious files
-        run: |
-          set -euo pipefail
-          [[ -s changed_files.txt ]] || exit 0
-          blocked='(^|/)\.vscode/|(^|/)temp_.*\.bat$|(^|/)\.env(\..*)?$|(^|/).*\.pem$|(^|/).*\.key$|(^|/)public/fonts/.*\.woff2?$'
-          if rg -n "$blocked" changed_files.txt; then
-            echo "Blocked suspicious files detected."
-            exit 1
-          fi
+            git diff --name-only "$base" "$head" > changed_files.txt || true
+            echo "Changed files:"
+            cat changed_files.txt || true
 
-      - name: Scan risky content
-        run: |
-          set -euo pipefail
-          [[ -s changed_files.txt ]] || exit 0
-          pattern='(curl\s+[^|\n]*\|\s*(bash|sh)|wget\s+[^|\n]*\|\s*(bash|sh)|AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----|ghp_[A-Za-z0-9_]{36,})'
-          while IFS= read -r f; do
-            [[ -f "$f" ]] || continue
-            if rg -n "$pattern" "$f"; then
-              echo "Risky content found in $f"
+        - name: Block suspicious file paths and extensions
+          shell: bash
+          run: |
+            set -euo pipefail
+            if [[ ! -s changed_files.txt ]]; then
+              echo "No changed files."
+              exit 0
+            fi
+
+            blocked_regex='(^|/)\.(env|pem|p12|key)$|(^|/)(id_rsa|id_dsa)$|\.exe$|\.dll$|\.so$|\.dylib$|\.jar$|\.apk$|\.ipa$|\.ps1$|\.bat$|\.cmd$|\.scr$|(^|/)(node_modules|vendor)/.*\.(php|js|sh|py)$'
+
+            bad_files=$(rg -n "$blocked_regex" changed_files.txt || true)
+            if [[ -n "$bad_files" ]]; then
+              echo "Blocked suspicious files detected:"
+              echo "$bad_files"
               exit 1
             fi
-          done < changed_files.txt
+
+        - name: Scan changed content for risky patterns
+          shell: bash
+          run: |
+            set -euo pipefail
+            if [[ ! -s changed_files.txt ]]; then
+              exit 0
+            fi
+
+            mapfile -t files < <(cat changed_files.txt)
+            if [[ ${#files[@]} -eq 0 ]]; then
+              exit 0
+            fi
+
+            pattern='(AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----|ghp_[A-Za-z0-9_]{36,}|xox[baprs]-[A-Za-z0-9-]{10,}|curl\s+[^|\n]*\|\s*(bash|sh)|wget\s+[^|\n]*\|\s*(bash|sh)|eval\(|
+  base64\s+-d\s*\|\s*(bash|sh)|system\(|shell_exec\(|passthru\(|proc_open\()'
+
+            hit=0
+            for f in "${files[@]}"; do
+              [[ -f "$f" ]] || continue
+              if rg -n "$pattern" "$f" > /tmp/security_hits.txt; then
+                echo "Risky pattern found in $f"
+                cat /tmp/security_hits.txt
+                hit=1
+              fi
+            done
+
+            if [[ $hit -ne 0 ]]; then
+              exit 1
+            fi
+
+        - name: Final
+          run: echo "Security Guard checks passed."
