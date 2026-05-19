@@ -1,0 +1,51 @@
+name: Security Guard
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine changed files
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
+          git diff --name-only "$base" "$head" > changed_files.txt || true
+
+      - name: Block suspicious files
+        run: |
+          set -euo pipefail
+          [[ -s changed_files.txt ]] || exit 0
+          blocked='(^|/)\.vscode/|(^|/)temp_.*\.bat$|(^|/)\.env(\..*)?$|(^|/).*\.pem$|(^|/).*\.key$|(^|/)public/fonts/.*\.woff2?$'
+          if rg -n "$blocked" changed_files.txt; then
+            echo "Blocked suspicious files detected."
+            exit 1
+          fi
+
+      - name: Scan risky content
+        run: |
+          set -euo pipefail
+          [[ -s changed_files.txt ]] || exit 0
+          pattern='(curl\s+[^|\n]*\|\s*(bash|sh)|wget\s+[^|\n]*\|\s*(bash|sh)|AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----|ghp_[A-Za-z0-9_]{36,})'
+          while IFS= read -r f; do
+            [[ -f "$f" ]] || continue
+            if rg -n "$pattern" "$f"; then
+              echo "Risky content found in $f"
+              exit 1
+            fi
+          done < changed_files.txt
